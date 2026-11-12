@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/Bloem-Studios/netbird-ha/ha/store/storetest"
+	"github.com/RXWatcher/netbird-ha/ha/store/storetest"
 )
 
 func TestMain(m *testing.M) { storetest.Main(m) }

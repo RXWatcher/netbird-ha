@@ -59,7 +59,7 @@ import (
 	nbpeer "github.com/netbirdio/netbird/management/server/peer"
 	nbstore "github.com/netbirdio/netbird/management/server/store"
 
-	hastore "github.com/Bloem-Studios/netbird-ha/ha/store"
+	hastore "github.com/RXWatcher/netbird-ha/ha/store"
 )
 
 const (

@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/Bloem-Studios/netbird-ha/ha/cache"
+	"github.com/RXWatcher/netbird-ha/ha/cache"
 )
 
 // TestURLFormatMatchesCacheAndDispatcher keeps NB_HA_REDIS_URL in the format of

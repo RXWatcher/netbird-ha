@@ -1,4 +1,4 @@
-module github.com/Bloem-Studios/netbird-ha
+module github.com/RXWatcher/netbird-ha
 
 go 1.26.0
 

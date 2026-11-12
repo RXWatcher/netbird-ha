@@ -29,7 +29,7 @@ import (
 	"github.com/netbirdio/netbird/management/server/types"
 	"github.com/netbirdio/netbird/shared/auth"
 
-	"github.com/Bloem-Studios/netbird-ha/ha/store/storetest"
+	"github.com/RXWatcher/netbird-ha/ha/store/storetest"
 )
 
 func openConn(t *testing.T, dsn string) *db.Conn {

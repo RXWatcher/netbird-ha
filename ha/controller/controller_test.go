@@ -15,7 +15,7 @@ import (
 	"github.com/netbirdio/netbird/management/internals/controllers/network_map"
 	"github.com/netbirdio/netbird/management/server/types"
 
-	"github.com/Bloem-Studios/netbird-ha/ha/bus"
+	"github.com/RXWatcher/netbird-ha/ha/bus"
 )
 
 // fakeUpdates is the per-instance stream registry (upstream's PeersUpdateManager).

@@ -12,7 +12,7 @@ import (
 
 	"github.com/netbirdio/netbird/management/cmd"
 
-	"github.com/Bloem-Studios/netbird-ha/ha"
+	"github.com/RXWatcher/netbird-ha/ha"
 )
 
 func main() {

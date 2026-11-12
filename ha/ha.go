@@ -26,9 +26,9 @@ import (
 	"github.com/netbirdio/netbird/management/internals/server"
 	nbgrpc "github.com/netbirdio/netbird/management/internals/shared/grpc"
 
-	"github.com/Bloem-Studios/netbird-ha/ha/bus"
-	"github.com/Bloem-Studios/netbird-ha/ha/controller"
-	"github.com/Bloem-Studios/netbird-ha/ha/wgkey"
+	"github.com/RXWatcher/netbird-ha/ha/bus"
+	"github.com/RXWatcher/netbird-ha/ha/controller"
+	"github.com/RXWatcher/netbird-ha/ha/wgkey"
 )
 
 // EnvResyncInterval overrides the periodic network-map resync (Go duration, default

@@ -6,7 +6,7 @@ import (
 
 	upstream "github.com/netbirdio/netbird/management/internals/modules/peers/ephemeral"
 
-	hastore "github.com/Bloem-Studios/netbird-ha/ha/store"
+	hastore "github.com/RXWatcher/netbird-ha/ha/store"
 )
 
 // Install injects Manager into s in place of upstream's

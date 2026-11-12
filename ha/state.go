@@ -13,10 +13,10 @@ import (
 	"github.com/netbirdio/netbird/management/internals/server"
 	nbcache "github.com/netbirdio/netbird/management/server/cache"
 
-	"github.com/Bloem-Studios/netbird-ha/ha/bus"
-	"github.com/Bloem-Studios/netbird-ha/ha/cache"
-	"github.com/Bloem-Studios/netbird-ha/ha/ephemeral"
-	"github.com/Bloem-Studios/netbird-ha/ha/store"
+	"github.com/RXWatcher/netbird-ha/ha/bus"
+	"github.com/RXWatcher/netbird-ha/ha/cache"
+	"github.com/RXWatcher/netbird-ha/ha/ephemeral"
+	"github.com/RXWatcher/netbird-ha/ha/store"
 )
 
 // EnvInstanceID names this instance in the migration record and the

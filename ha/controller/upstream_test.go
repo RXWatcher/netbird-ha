@@ -27,7 +27,7 @@ import (
 	"github.com/netbirdio/netbird/management/server/telemetry"
 	"github.com/netbirdio/netbird/management/server/types"
 
-	"github.com/Bloem-Studios/netbird-ha/ha/bus"
+	"github.com/RXWatcher/netbird-ha/ha/bus"
 )
 
 const (

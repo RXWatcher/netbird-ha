@@ -23,8 +23,8 @@ import (
 	nbstore "github.com/netbirdio/netbird/management/server/store"
 	"github.com/netbirdio/netbird/management/server/types"
 
-	hastore "github.com/Bloem-Studios/netbird-ha/ha/store"
-	"github.com/Bloem-Studios/netbird-ha/ha/store/storetest"
+	hastore "github.com/RXWatcher/netbird-ha/ha/store"
+	"github.com/RXWatcher/netbird-ha/ha/store/storetest"
 )
 
 func TestMain(m *testing.M) { storetest.Main(m) }

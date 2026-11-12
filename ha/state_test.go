@@ -11,11 +11,11 @@ import (
 	nbstore "github.com/netbirdio/netbird/management/server/store"
 	"github.com/netbirdio/netbird/management/server/types"
 
-	"github.com/Bloem-Studios/netbird-ha/ha/bus"
-	"github.com/Bloem-Studios/netbird-ha/ha/cache"
-	"github.com/Bloem-Studios/netbird-ha/ha/ephemeral"
-	"github.com/Bloem-Studios/netbird-ha/ha/store"
-	"github.com/Bloem-Studios/netbird-ha/ha/store/storetest"
+	"github.com/RXWatcher/netbird-ha/ha/bus"
+	"github.com/RXWatcher/netbird-ha/ha/cache"
+	"github.com/RXWatcher/netbird-ha/ha/ephemeral"
+	"github.com/RXWatcher/netbird-ha/ha/store"
+	"github.com/RXWatcher/netbird-ha/ha/store/storetest"
 )
 
 func TestStateOffInjectsNothing(t *testing.T) {

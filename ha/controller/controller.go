@@ -31,7 +31,7 @@ import (
 	"github.com/netbirdio/netbird/management/server/types"
 	"github.com/netbirdio/netbird/shared/management/networkmap/nmdata"
 
-	"github.com/Bloem-Studios/netbird-ha/ha/bus"
+	"github.com/RXWatcher/netbird-ha/ha/bus"
 )
 
 // ResyncReason labels resync updates in upstream's update metrics.

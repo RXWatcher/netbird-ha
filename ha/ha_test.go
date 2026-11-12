@@ -10,9 +10,9 @@ import (
 	"github.com/netbirdio/netbird/management/internals/server"
 	nbconfig "github.com/netbirdio/netbird/management/internals/server/config"
 
-	"github.com/Bloem-Studios/netbird-ha/ha/bus"
-	"github.com/Bloem-Studios/netbird-ha/ha/controller"
-	"github.com/Bloem-Studios/netbird-ha/ha/wgkey"
+	"github.com/RXWatcher/netbird-ha/ha/bus"
+	"github.com/RXWatcher/netbird-ha/ha/controller"
+	"github.com/RXWatcher/netbird-ha/ha/wgkey"
 )
 
 func newBase() *server.BaseServer {

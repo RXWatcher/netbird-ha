@@ -13,7 +13,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/Bloem-Studios/netbird-ha/ha/cache"
+	"github.com/RXWatcher/netbird-ha/ha/cache"
 )
 
 // Environment variables read by ConfigFromEnv.
