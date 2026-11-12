@@ -21,6 +21,8 @@
 #   NBHA_PG_ACCESS  multihost (default): libpq multi-host DSN, target_session_attrs=read-write
 #                   lb: through HAProxy's primary-tracking :5432 frontend.
 #   NBHA_CLIENTS    1 (default) start the six clients; 0 leaves them out.
+#   NBHA_IMAGE_VERSION  ha: image tag and version string (default: git describe)
+#   NBHA_UPGRADE_BUILD  1: also build <version>-next images for scenario 8
 #
 # Everything runs in compose project "nbha-bed" on docker network "nbha-bed".
 # Host ports are ephemeral and bound to 127.0.0.1.
@@ -122,8 +124,16 @@ write_settings() {
 	[ -n "$(env_get NBHA_SETUP_KEY)" ] || env_set NBHA_SETUP_KEY ""
 
 	if [ "$impl" = ha ]; then
-		env_set NBHA_MGMT_IMAGE nbha-bed/management:local
-		env_set NBHA_SIGNAL_IMAGE nbha-bed/signal:local
+		# Images from `make images` (cmd/*/Dockerfile), tagged with the build version.
+		local v=${NBHA_IMAGE_VERSION:-$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo dev)}
+		env_set NBHA_IMAGE_VERSION "$v"
+		env_set NBHA_MGMT_IMAGE "netbird-ha/management:$v"
+		env_set NBHA_SIGNAL_IMAGE "netbird-ha/signal:$v"
+		if [ "${NBHA_UPGRADE_BUILD:-0}" = 1 ]; then
+			# Scenario 8 rolls the instances onto a second build (only the version differs).
+			env_set NBHA_UPGRADE_MGMT_IMAGE "netbird-ha/management:$v-next"
+			env_set NBHA_UPGRADE_SIGNAL_IMAGE "netbird-ha/signal:$v-next"
+		fi
 	else
 		env_set NBHA_MGMT_IMAGE "${NBHA_STOCK_MGMT_IMAGE:-netbirdio/management:0.82.1}"
 		env_set NBHA_SIGNAL_IMAGE "${NBHA_STOCK_SIGNAL_IMAGE:-netbirdio/signal:0.82.1}"
@@ -134,9 +144,14 @@ build_images() {
 	log "building pg_auto_failover image"
 	docker build -q -t nbha-bed/pgaf:17 "$DEPLOY_DIR/compose/pgaf" >/dev/null
 	if [ "$(env_get NBHA_IMPL)" = ha ]; then
-		log "building management and signal from cmd/ (this repository)"
-		DOCKER_BUILDKIT=1 docker build -q -f "$ROOT/cmd/management/Dockerfile" -t nbha-bed/management:local "$ROOT" >/dev/null
-		DOCKER_BUILDKIT=1 docker build -q -f "$ROOT/cmd/signal/Dockerfile" -t nbha-bed/signal:local "$ROOT" >/dev/null
+		local v
+		v=$(env_get NBHA_IMAGE_VERSION)
+		log "building management and signal from cmd/ (make images VERSION=$v)"
+		make -s -C "$ROOT" images VERSION="$v" >/dev/null
+		if [ -n "$(env_get NBHA_UPGRADE_MGMT_IMAGE)" ]; then
+			log "building the upgrade images (make images VERSION=$v-next)"
+			make -s -C "$ROOT" images VERSION="$v-next" >/dev/null
+		fi
 	fi
 }
 
@@ -281,6 +296,8 @@ cmd_env() {
 	echo "export NBHA_LB_STATS=http://127.0.0.1:$(lb_port 8404)"
 	echo "export NBHA_LB_ADMIN=127.0.0.1:$(lb_port 9999)"
 	echo "export NBHA_PAT=$(env_get NBHA_PAT)"
+	echo "export NBHA_UPGRADE_MGMT_IMAGE=$(env_get NBHA_UPGRADE_MGMT_IMAGE)"
+	echo "export NBHA_UPGRADE_SIGNAL_IMAGE=$(env_get NBHA_UPGRADE_SIGNAL_IMAGE)"
 }
 
 cmd_status() {

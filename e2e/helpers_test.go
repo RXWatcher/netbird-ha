@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Bloem-Studios/netbird-ha/e2e/bed"
+	"github.com/RXWatcher/netbird-ha/e2e/bed"
 )
 
 // propagationBudget is the cross-instance propagation target from the design report.

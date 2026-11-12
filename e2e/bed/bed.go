@@ -37,6 +37,9 @@ type Bed struct {
 	LBAdmin string // HAProxy runtime API host:port
 
 	PAT string
+
+	// Images scenario 8 rolls the instances onto (empty: recreate with the same image).
+	UpgradeMgmtImage, UpgradeSignalImage string
 }
 
 // Load reads the bed's details from `deploy/bed.sh env`.
@@ -64,6 +67,9 @@ func Load(ctx context.Context) (*Bed, error) {
 		LBStats: vars["NBHA_LB_STATS"],
 		LBAdmin: vars["NBHA_LB_ADMIN"],
 		PAT:     vars["NBHA_PAT"],
+
+		UpgradeMgmtImage:   vars["NBHA_UPGRADE_MGMT_IMAGE"],
+		UpgradeSignalImage: vars["NBHA_UPGRADE_SIGNAL_IMAGE"],
 	}
 	b.Instances = 1
 	if vars["NBHA_INSTANCES"] == "2" {

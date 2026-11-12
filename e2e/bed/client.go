@@ -219,12 +219,14 @@ func (c *DynClient) Remove(ctx context.Context) {
 }
 
 // MoveManagement points a client at another management URL by re-running
-// `netbird up` with it; the daemon reconnects to the new address.
+// `netbird up` with it; the daemon reconnects to the new address. The URL goes
+// in through NB_MANAGEMENT_URL: the CLI applies NB_* variables over its flags,
+// and docker exec inherits the container's own NB_MANAGEMENT_URL.
 func MoveManagement(ctx context.Context, container, url string) error {
 	if _, err := Exec(ctx, container, "netbird", "down"); err != nil {
 		return err
 	}
-	_, err := Exec(ctx, container, "netbird", "up", "--management-url", url)
+	_, err := Docker(ctx, "exec", "-e", "NB_MANAGEMENT_URL="+url, container, "netbird", "up", "--management-url", url)
 	return err
 }
 

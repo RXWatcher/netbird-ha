@@ -88,3 +88,22 @@ NB_SIGNAL_REDIS_URL=$REDIS
 One URL for all three is fine: the bus uses only pub/sub, and the cache and signal keys have their own
 prefixes. To separate them anyway, add `&db=N` (or put `/N` before the `?`). Optional tuning for signal is in [dispatcher/README.md](dispatcher/README.md). Clients see one
 management URL and one signal URL on the load balancer; list each relay by its own URL with the same secret.
+
+## Test bed and end-to-end scenarios (`deploy/`, `e2e/`)
+
+A local Docker Compose bed (project and network `nbha-bed`) with the topology of
+[docs/design-report.md](docs/design-report.md) section 4.1, and the scenarios from section 4.6 in `e2e/`
+(its own Go module). Needs Docker, `jq` and `curl`. Secrets are generated at `bed-up` into the gitignored
+`deploy/.env`; host ports are ephemeral and bound to 127.0.0.1.
+
+| Target | What |
+|---|---|
+| `make bed-up` / `make bed-down` / `make bed-status` | start (with `NBHA_IMPL=ha` it runs `make images` first), remove everything, show state |
+| `make e2e` | fresh bed with this repository's images (2 management, 2 signal), every scenario, then `bed-down` |
+| `make e2e-baseline` | the same with stock `netbirdio/*:0.82.1` images (1 instance; `NBHA_INSTANCES=2` for the two-instance stock baseline, where cross-instance scenarios report XFAIL) |
+| `make e2e-run` | the scenarios against the bed that is up now |
+
+Useful variables: `E2E_RUN=<regexp>` selects scenarios, `KEEP_BED=1` leaves the bed up, `NBHA_E2E_LONG=1`
+adds the ephemeral and soak scenarios, `NBHA_SOAK=30m` sets the soak length, `NBHA_UPGRADE_BUILD=1` builds
+a second image set for the rolling upgrade, `NBHA_LB_MODE=l7` balances per gRPC stream. The report table
+is printed at the end and written to `deploy/.state/e2e-report.tsv`. `deploy/bed.sh` documents the rest.

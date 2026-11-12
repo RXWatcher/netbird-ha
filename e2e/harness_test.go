@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bloem-Studios/netbird-ha/e2e/bed"
+	"github.com/RXWatcher/netbird-ha/e2e/bed"
 )
 
 // Scenario outcomes, printed as a table at the end of the run.
@@ -75,6 +75,9 @@ type spec struct {
 	// haIfTwo: with two instances the scenario depends on the HA build; on the
 	// stock build it is expected to fail (XFAIL).
 	haIfTwo bool
+	// haOnly: needs the HA build even with one instance (an upstream gap the
+	// HA build closes); expected to fail (XFAIL) on the stock build.
+	haOnly bool
 	// long: runs only with NBHA_E2E_LONG=1.
 	long bool
 }
@@ -148,10 +151,15 @@ func run(t *testing.T, sp spec, fn func(s *S)) {
 		t.Skip(res.detail)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), scenarioTimeout(sp))
-	defer cancel()
+	// Cancel after the scenario's own cleanups (t.Cleanup runs last-in first-out),
+	// which use ctx to remove containers, users and peers.
+	t.Cleanup(cancel)
 	s := &S{T: t, B: theBed, Ctx: ctx}
 	if sp.haIfTwo && theBed.Instances == 2 && !theBed.HA() {
 		s.xfail = "stock build has no cross-instance state"
+	}
+	if sp.haOnly && !theBed.HA() {
+		s.xfail = "upstream gap closed only by the HA build"
 	}
 	if theBed.Instances == 1 && !sp.needsTwo {
 		t.Logf("single instance: this checks the scenario's mechanics, not cross-instance behaviour")

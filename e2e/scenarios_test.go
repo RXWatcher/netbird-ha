@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -11,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Bloem-Studios/netbird-ha/e2e/bed"
+	"github.com/RXWatcher/netbird-ha/e2e/bed"
 )
 
 // connectivity pings from a to b until it works and checks the connection type.
@@ -580,14 +581,21 @@ func TestS7EphemeralMove(t *testing.T) {
 				_ = s.B.API.DeletePeer(ctx, p.ID)
 			}
 		})
+		var label string
 		if _, err := bed.Eventually(ctx, 90*time.Second, time.Second, func() error {
 			p, err := s.B.API.PeerByName(ctx, name)
 			if err != nil || !p.Connected || !p.Ephemeral {
 				return fmt.Errorf("ceph not connected/ephemeral: %+v %v", p, err)
 			}
+			// Peers added with a setup key can get a DNS label with a suffix;
+			// clients list peers by label.
+			label, _, _ = strings.Cut(p.DNSLabel, ".")
 			return nil
 		}); err != nil {
 			s.Fatalf("%v", err)
+		}
+		if _, err := waitSees(ctx, "c1", label, true, 30*time.Second); err != nil {
+			s.Fatalf("c1 does not list %s before the move: %v", label, err)
 		}
 		if err := bed.MoveManagement(ctx, dc.Container, "http://lb:8082"); err != nil {
 			s.Fatalf("move to mgmt-2: %v", err)
@@ -615,9 +623,100 @@ func TestS7EphemeralMove(t *testing.T) {
 			}
 			time.Sleep(15 * time.Second)
 		}
-		if ok, _ := sees(ctx, "c1", name); !ok {
-			s.Errorf("c1 no longer lists ceph")
+		if ok, _ := sees(ctx, "c1", label); !ok {
+			s.Errorf("c1 no longer lists %s", label)
 		}
+		if p, err := s.B.API.PeerByName(ctx, name); err != nil || !p.Connected {
+			s.Errorf("ceph after the wait: connected=%v err=%v", p.Connected, err)
+		}
+	})
+}
+
+// 7b. An ephemeral peer whose instance dies with it (host loss) is still
+// cleaned up. The dead instance never marks the peer disconnected, so upstream
+// skips it for ever; ha/ephemeral's registry notices the stale session.
+func TestS7bEphemeralOfKilledInstance(t *testing.T) {
+	run(t, spec{id: "7b", title: "ephemeral peer of a killed instance is cleaned up", haOnly: true, long: true}, func(s *S) {
+		ctx := s.Ctx
+		key, err := s.B.API.CreateSetupKey(ctx, "e2e-ephemeral-kill", true, nil)
+		if err != nil {
+			s.Fatalf("setup key: %v", err)
+		}
+		name := dynName("cekill")
+		dc, err := bed.StartDynClient(ctx, name, bed.DynClientOptions{SetupKey: key.Key, ManagementURL: "http://lb:8081"})
+		if err != nil {
+			s.Fatalf("start: %v", err)
+		}
+		s.Cleanup(func() {
+			dc.Remove(context.Background())
+			if p, err := s.B.API.PeerByName(context.Background(), name); err == nil {
+				_ = s.B.API.DeletePeer(context.Background(), p.ID)
+			}
+		})
+		var peerID string
+		if _, err := bed.Eventually(ctx, 90*time.Second, time.Second, func() error {
+			p, err := s.B.API.PeerByName(ctx, name)
+			if err != nil || !p.Connected || !p.Ephemeral {
+				return fmt.Errorf("%s not connected/ephemeral: %+v %v", name, p, err)
+			}
+			peerID = p.ID
+			if s.Two() {
+				pl, err := s.B.Placement(ctx)
+				if err != nil {
+					return err
+				}
+				if pl[name]["mgmt"] != "mgmt-1" {
+					return fmt.Errorf("%s on %q, want mgmt-1", name, pl[name]["mgmt"])
+				}
+			}
+			return nil
+		}); err != nil {
+			s.Fatalf("%v", err)
+		}
+		// Freeze the client so it cannot reconnect elsewhere, kill its instance,
+		// then remove the client: nobody ever sees the stream close.
+		if _, err := bed.Docker(ctx, "pause", dc.Container); err != nil {
+			s.Fatalf("pause client: %v", err)
+		}
+		tKill := time.Now()
+		if err := bed.Kill(ctx, "mgmt-1"); err != nil {
+			s.Fatalf("kill mgmt-1: %v", err)
+		}
+		dc.Remove(ctx)
+		if s.Two() {
+			// Host loss: mgmt-1 stays down, only mgmt-2 can clean up.
+			s.Cleanup(func() { _ = bed.Start(context.Background(), "mgmt-1") })
+		} else {
+			time.Sleep(3 * time.Second)
+			if err := bed.Start(ctx, "mgmt-1"); err != nil {
+				s.Fatalf("restart mgmt-1: %v", err)
+			}
+		}
+		s.Logf("killed mgmt-1 holding %s's stream and removed the client", name)
+		// ha/ephemeral: stale after 3 min (+ up to 1.2 min reconcile), then
+		// upstream's 10 min lifetime with a 1 min cleanup window.
+		wait := envDuration("NBHA_EPHEMERAL_CLEANUP_WAIT", 17*time.Minute)
+		var tDisc time.Duration
+		took, err := bed.Eventually(ctx, wait, 10*time.Second, func() error {
+			api := s.B.API
+			p, err := api.PeerByName(ctx, name)
+			var he *bed.HTTPError
+			if err != nil && (errors.As(err, &he) && he.Status == 404 || strings.Contains(err.Error(), "not found")) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if !p.Connected && tDisc == 0 {
+				tDisc = time.Since(tKill)
+				s.Logf("%s marked disconnected %s after the kill", name, tDisc.Round(time.Second))
+			}
+			return fmt.Errorf("%s (%s) still registered, connected=%v", name, peerID, p.Connected)
+		})
+		if err != nil {
+			s.Fatalf("ephemeral peer of the killed instance not deleted: %v", err)
+		}
+		s.Logf("%s deleted %s after the kill (marked disconnected after %s)", name, took.Round(time.Second), tDisc.Round(time.Second))
 	})
 }
 
@@ -675,7 +774,14 @@ func TestS8RollingUpgrade(t *testing.T) {
 			}
 		}()
 
-		image := map[string]string{"mgmt": os.Getenv("NBHA_UPGRADE_MGMT_IMAGE"), "signal": os.Getenv("NBHA_UPGRADE_SIGNAL_IMAGE")}
+		image := map[string]string{"mgmt": s.B.UpgradeMgmtImage, "signal": s.B.UpgradeSignalImage}
+		if v := os.Getenv("NBHA_UPGRADE_MGMT_IMAGE"); v != "" {
+			image["mgmt"] = v
+		}
+		if v := os.Getenv("NBHA_UPGRADE_SIGNAL_IMAGE"); v != "" {
+			image["signal"] = v
+		}
+		s.Logf("upgrade images: mgmt=%q signal=%q (empty: recreate with the current image)", image["mgmt"], image["signal"])
 		for _, svc := range steps {
 			kind, n, _ := strings.Cut(svc, "-")
 			be := "be_" + kind + n
