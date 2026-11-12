@@ -76,8 +76,17 @@ func healthy(s *S) {
 		s.T.Fatalf("clients not connected: %v", err)
 	}
 	if s.B.Instances == 2 {
-		if _, err := bed.Eventually(ctx, 30*time.Second, time.Second, func() error {
-			return checkHomePlacement(ctx, s.B)
+		// A client can reconnect to the backup again while its home instance is
+		// still settling; cut the backup sessions again until everyone is home.
+		last := time.Now()
+		if _, err := bed.Eventually(ctx, 60*time.Second, time.Second, func() error {
+			err := checkHomePlacement(ctx, s.B)
+			if err != nil && time.Since(last) > 10*time.Second {
+				s.Logf("rebalancing again: %v", err)
+				rebalance(s)
+				last = time.Now()
+			}
+			return err
 		}); err != nil {
 			s.T.Fatalf("clients not on their home instances: %v", err)
 		}
