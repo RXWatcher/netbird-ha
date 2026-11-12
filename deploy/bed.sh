@@ -9,7 +9,7 @@
 #
 # Settings (environment, read by `up`; `up` records them in deploy/.env):
 #   NBHA_IMPL       auto (default) | stock | ha
-#                   stock: upstream netbirdio/{management,signal}:0.82.1 images.
+#                   stock: upstream netbirdio/{management,signal}:0.83.0 images.
 #                   ha: build cmd/management and cmd/signal from this repository.
 #                   auto: ha when cmd/management/Dockerfile exists, else stock.
 #   NBHA_INSTANCES  1 | 2 (default: 2 for ha, 1 for stock)
@@ -23,6 +23,9 @@
 #   NBHA_CLIENTS    1 (default) start the six clients; 0 leaves them out.
 #   NBHA_IMAGE_VERSION  ha: image tag and version string (default: git describe)
 #   NBHA_UPGRADE_BUILD  1: also build <version>-next images for scenario 8
+#   NBHA_UPGRADE_FROM   <git ref> (ha): start the bed on images built from that ref (an earlier
+#                   release, e.g. v0.1.1-pilot) and let scenario 8 roll it onto this tree's
+#                   images, so a mixed-version window is exercised. Overrides NBHA_UPGRADE_BUILD.
 #
 # Everything runs in compose project "nbha-bed" on docker network "nbha-bed".
 # Host ports are ephemeral and bound to 127.0.0.1.
@@ -127,16 +130,24 @@ write_settings() {
 		# Images from `make images` (cmd/*/Dockerfile), tagged with the build version.
 		local v=${NBHA_IMAGE_VERSION:-$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo dev)}
 		env_set NBHA_IMAGE_VERSION "$v"
+		env_set NBHA_UPGRADE_FROM "${NBHA_UPGRADE_FROM:-}"
 		env_set NBHA_MGMT_IMAGE "netbird-ha/management:$v"
 		env_set NBHA_SIGNAL_IMAGE "netbird-ha/signal:$v"
-		if [ "${NBHA_UPGRADE_BUILD:-0}" = 1 ]; then
+		if [ -n "${NBHA_UPGRADE_FROM:-}" ]; then
+			# Start on the earlier release; scenario 8 rolls onto this tree's images.
+			local from=${NBHA_UPGRADE_FROM//[^A-Za-z0-9_.-]/-}
+			env_set NBHA_MGMT_IMAGE "netbird-ha/management:$from"
+			env_set NBHA_SIGNAL_IMAGE "netbird-ha/signal:$from"
+			env_set NBHA_UPGRADE_MGMT_IMAGE "netbird-ha/management:$v"
+			env_set NBHA_UPGRADE_SIGNAL_IMAGE "netbird-ha/signal:$v"
+		elif [ "${NBHA_UPGRADE_BUILD:-0}" = 1 ]; then
 			# Scenario 8 rolls the instances onto a second build (only the version differs).
 			env_set NBHA_UPGRADE_MGMT_IMAGE "netbird-ha/management:$v-next"
 			env_set NBHA_UPGRADE_SIGNAL_IMAGE "netbird-ha/signal:$v-next"
 		fi
 	else
-		env_set NBHA_MGMT_IMAGE "${NBHA_STOCK_MGMT_IMAGE:-netbirdio/management:0.82.1}"
-		env_set NBHA_SIGNAL_IMAGE "${NBHA_STOCK_SIGNAL_IMAGE:-netbirdio/signal:0.82.1}"
+		env_set NBHA_MGMT_IMAGE "${NBHA_STOCK_MGMT_IMAGE:-netbirdio/management:0.83.0}"
+		env_set NBHA_SIGNAL_IMAGE "${NBHA_STOCK_SIGNAL_IMAGE:-netbirdio/signal:0.83.0}"
 	fi
 }
 
@@ -148,7 +159,21 @@ build_images() {
 		v=$(env_get NBHA_IMAGE_VERSION)
 		log "building management and signal from cmd/ (make images HA_VERSION=$v)"
 		make -s -C "$ROOT" images HA_VERSION="$v" IMAGE_TAG="$v" >/dev/null
-		if [ -n "$(env_get NBHA_UPGRADE_MGMT_IMAGE)" ]; then
+		local from_ref
+		from_ref=$(env_get NBHA_UPGRADE_FROM)
+		if [ -n "$from_ref" ]; then
+			local from=${from_ref//[^A-Za-z0-9_.-]/-} src
+			src=$(mktemp -d)
+			git -C "$ROOT" archive "$from_ref" | tar -x -C "$src"
+			# docker build directly: an older Makefile may not know IMAGE_TAG.
+			local upstream fv
+			upstream=$(awk '$1=="github.com/netbirdio/netbird"{sub(/^v/,"",$2);print $2;exit}' "$src/go.mod")
+			fv="$upstream+netbird-ha.$from_ref"
+			log "building the starting images from $from_ref (version $fv)"
+			docker build -q -f "$src/cmd/management/Dockerfile" --build-arg VERSION="$fv" -t "netbird-ha/management:$from" "$src" >/dev/null
+			docker build -q -f "$src/cmd/signal/Dockerfile" --build-arg VERSION="$fv" -t "netbird-ha/signal:$from" "$src" >/dev/null
+			rm -rf "$src"
+		elif [ -n "$(env_get NBHA_UPGRADE_MGMT_IMAGE)" ]; then
 			log "building the upgrade images (make images HA_VERSION=$v-next)"
 			make -s -C "$ROOT" images HA_VERSION="$v-next" IMAGE_TAG="$v-next" >/dev/null
 		fi
