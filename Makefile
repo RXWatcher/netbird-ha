@@ -4,20 +4,28 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X github.com/netbirdio/netbird/version.version=$(VERSION)
 UPSTREAM_DIR = $(shell go list -m -f '{{.Dir}}' github.com/netbirdio/netbird)
 
-.PHONY: build test test-race lint check-upstream-callers upstream-mgmt-test images
+.PHONY: build test test-race test-dispatcher-integration lint check-upstream-callers upstream-mgmt-test images
 
 build:
 	CGO_ENABLED=1 go build -ldflags '$(LDFLAGS)' -o bin/netbird-mgmt ./cmd/management
 	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o bin/netbird-signal ./cmd/signal
 
+# dispatcher/ is its own module (it replaces upstream's signal-dispatcher), so ./... skips it.
 test:
 	go test ./...
+	cd dispatcher && go test ./...
 
 test-race:
 	go test -race ./...
+	cd dispatcher && go test -race ./...
+
+# Valkey and Valkey+Sentinel containers on the host network; needs Docker.
+test-dispatcher-integration:
+	cd dispatcher && go test -tags integration -run Integration ./...
 
 lint:
 	$(GOLANGCI_LINT) run ./...
+	cd dispatcher && $(GOLANGCI_LINT) run --build-tags integration ./...
 
 check-upstream-callers:
 	scripts/check-upstream-callers.sh

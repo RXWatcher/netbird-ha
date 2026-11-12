@@ -233,3 +233,7 @@ replace github.com/cloudflare/circl => codeberg.org/cunicu/circl v0.0.0-20230801
 replace github.com/mailru/easyjson => github.com/netbirdio/easyjson v0.9.0
 
 replace github.com/wailsapp/wails/v3 => github.com/netbirdio/wails/v3 v3.0.0-beta.3.0.20261028091752-cfa103160796
+
+// Signal routing between instances: our dispatcher/ module replaces the one
+// upstream pins (same module path and API).
+replace github.com/netbirdio/signal-dispatcher/dispatcher => ./dispatcher

@@ -24,6 +24,7 @@ import (
 // remoteQueueSize bounds the messages from other instances waiting for one local peer.
 const remoteQueueSize = 128
 
+// Dispatcher delivers signal messages to the peers registered with ListenForMessages.
 type Dispatcher struct {
 	peerChannels map[string]*peerChan
 	mu           sync.RWMutex
@@ -235,17 +236,6 @@ func (d *Dispatcher) ListenForMessages(ctx context.Context, id string, messageHa
 	}()
 
 	return nil
-}
-
-// snapshot returns the current registrations.
-func (d *Dispatcher) snapshot() []*peerChan {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	out := make([]*peerChan, 0, len(d.peerChannels))
-	for _, p := range d.peerChannels {
-		out = append(out, p)
-	}
-	return out
 }
 
 func (d *Dispatcher) isSuperseded(p *peerChan) bool {

@@ -29,6 +29,8 @@ caller that the controller wrapper does not see; allowlist in `scripts/upstream-
 `make upstream-mgmt-test` (upstream's management tests at the pinned version, HA off). Images:
 `cmd/management/Dockerfile` and `cmd/signal/Dockerfile`, built from the repository root.
 
-TODO (A, once workstream C lands `dispatcher/`): add
-`replace github.com/netbirdio/signal-dispatcher/dispatcher => ./dispatcher` to `go.mod`
-(upstream's module path ends in `/dispatcher`).
+`go.mod` swaps upstream's signal dispatcher for `dispatcher/` with
+`replace github.com/netbirdio/signal-dispatcher/dispatcher => ./dispatcher`. `dispatcher/` is its own
+module: `make test` and `make lint` cover it, and `make test-dispatcher-integration` runs its Valkey and
+Sentinel tests in Docker. Its configuration (`NB_SIGNAL_REDIS_URL` and friends) and delivery guarantees
+are in [dispatcher/README.md](dispatcher/README.md).
