@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -125,24 +124,24 @@ func TestRedisPublishFailsWhenDown(t *testing.T) {
 }
 
 func TestNewClientSelectsSentinel(t *testing.T) {
-	c, err := NewClient(Config{SentinelAddrs: []string{"127.0.0.1:26379"}, SentinelMaster: "mymaster"})
+	c, err := NewClient("redis://u:p@127.0.0.1:26379/2?master_name=mymaster&addr=127.0.0.2:26379&sentinel_password=spw")
 	require.NoError(t, err)
 	defer c.Close()
 	// NewFailoverClient returns a *redis.Client whose dialer asks the sentinels.
-	cl, ok := c.(*redis.Client)
-	require.True(t, ok)
-	assert.Equal(t, "FailoverClient", cl.Options().Addr)
+	assert.Equal(t, "FailoverClient", c.Options().Addr)
+	assert.Equal(t, 2, c.Options().DB)
+	assert.Equal(t, "u", c.Options().Username)
 
-	c2, err := NewClient(Config{URL: "redis://user:pw@127.0.0.1:6380/3"})
+	c2, err := NewClient("redis://user:pw@127.0.0.1:6380/3")
 	require.NoError(t, err)
 	defer c2.Close()
-	assert.Equal(t, "127.0.0.1:6380", c2.(*redis.Client).Options().Addr)
-	assert.Equal(t, 3, c2.(*redis.Client).Options().DB)
+	assert.Equal(t, "127.0.0.1:6380", c2.Options().Addr)
+	assert.Equal(t, 3, c2.Options().DB)
 
-	_, err = NewClient(Config{SentinelAddrs: []string{"x:1"}})
-	require.Error(t, err, "sentinel without master name")
-	_, err = NewClient(Config{URL: "redis://x", SentinelAddrs: []string{"x:1"}, SentinelMaster: "m"})
-	require.Error(t, err, "both modes")
+	_, err = NewClient("redis://s1?master_name=")
+	require.Error(t, err, "empty master name")
+	_, err = NewClient("")
+	require.Error(t, err)
 }
 
 func TestConfigFromEnv(t *testing.T) {
@@ -150,20 +149,18 @@ func TestConfigFromEnv(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, enabled)
 
-	t.Setenv(EnvSentinelAddrs, " s1:26379, s2:26379 ,")
-	t.Setenv(EnvSentinelMaster, "mymaster")
-	t.Setenv(EnvRedisDB, "2")
+	t.Setenv(EnvRedisURL, "redis://s1:26379?master_name=mymaster&addr=s2:26379")
 	t.Setenv(EnvInstanceID, "mgmt-1")
 	c, enabled, err := ConfigFromEnv()
 	require.NoError(t, err)
 	assert.True(t, enabled)
-	assert.Equal(t, []string{"s1:26379", "s2:26379"}, c.SentinelAddrs)
-	assert.Equal(t, 2, c.DB)
 	assert.Equal(t, "mgmt-1", c.Origin)
 
-	t.Setenv(EnvRedisDB, "x")
-	_, _, err = ConfigFromEnv()
+	t.Setenv(EnvRedisURL, "redis://u:secretpw@s1?master_name=m&bogus=1")
+	_, enabled, err = ConfigFromEnv()
 	require.Error(t, err)
+	assert.True(t, enabled)
+	assert.NotContains(t, err.Error(), "secretpw")
 }
 
 func TestDefaultOriginIsUnique(t *testing.T) {

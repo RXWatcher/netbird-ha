@@ -3,49 +3,37 @@ package bus
 import (
 	"context"
 	"crypto/rand"
-	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
 	"os"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/Bloem-Studios/netbird-ha/ha/cache"
 )
 
-// Environment variables read by ConfigFromEnv (names, not values).
-//
-//nolint:gosec // G101: these are variable names
+// Environment variables read by ConfigFromEnv.
 const (
-	EnvRedisURL         = "NB_HA_REDIS_URL"             // redis://[user:pass@]host:port/db or rediss://
-	EnvSentinelAddrs    = "NB_HA_REDIS_SENTINEL_ADDRS"  // host:port,host:port
-	EnvSentinelMaster   = "NB_HA_REDIS_SENTINEL_MASTER" // master name, required with addrs
-	EnvSentinelPassword = "NB_HA_REDIS_SENTINEL_PASSWORD"
-	EnvRedisUsername    = "NB_HA_REDIS_USERNAME" // Sentinel mode only; the URL carries its own
-	EnvRedisPassword    = "NB_HA_REDIS_PASSWORD" // Sentinel mode only
-	EnvRedisDB          = "NB_HA_REDIS_DB"       // Sentinel mode only
-	EnvRedisTLS         = "NB_HA_REDIS_TLS"      // Sentinel mode only: "true" for TLS to master and sentinels
-	EnvChannel          = "NB_HA_BUS_CHANNEL"
-	EnvInstanceID       = "NB_HA_INSTANCE_ID"
+	// EnvRedisURL turns HA messaging on. It takes the same URL format as
+	// NB_CACHE_REDIS_ADDRESS (ha/cache) and NB_SIGNAL_REDIS_URL (dispatcher/), and is
+	// parsed by the same code (cache.ParseURL):
+	//   redis[s]://[user:pass@]host:6379[/db]                      one server
+	//   redis[s]://[user:pass@]sentinel1:26379[/db]?master_name=mymaster&addr=sentinel2:26379&...
+	//                                                              Sentinel
+	EnvRedisURL   = "NB_HA_REDIS_URL"
+	EnvChannel    = "NB_HA_BUS_CHANNEL"
+	EnvInstanceID = "NB_HA_INSTANCE_ID"
 
 	DefaultChannel = "netbird-ha:mgmt:updates"
 )
 
-// Config selects a plain Redis/Valkey server (URL) or a Sentinel-managed master.
+// Config names the Redis/Valkey server or Sentinel deployment by URL.
 type Config struct {
 	URL string
-
-	SentinelAddrs    []string
-	SentinelMaster   string
-	SentinelPassword string
-	Username         string
-	Password         string
-	DB               int
-	TLS              bool
 
 	Channel string
 	Origin  string
@@ -56,44 +44,20 @@ type Config struct {
 }
 
 // ConfigFromEnv returns the bus config and whether HA messaging is enabled at all
-// (NB_HA_REDIS_URL or NB_HA_REDIS_SENTINEL_ADDRS set).
+// (NB_HA_REDIS_URL set). A malformed URL is an error.
 func ConfigFromEnv() (Config, bool, error) {
 	c := Config{
-		URL:              os.Getenv(EnvRedisURL),
-		SentinelMaster:   os.Getenv(EnvSentinelMaster),
-		SentinelPassword: os.Getenv(EnvSentinelPassword),
-		Username:         os.Getenv(EnvRedisUsername),
-		Password:         os.Getenv(EnvRedisPassword),
-		Channel:          os.Getenv(EnvChannel),
-		Origin:           os.Getenv(EnvInstanceID),
-		TLS:              strings.EqualFold(os.Getenv(EnvRedisTLS), "true"),
+		URL:     os.Getenv(EnvRedisURL),
+		Channel: os.Getenv(EnvChannel),
+		Origin:  os.Getenv(EnvInstanceID),
 	}
-	for _, a := range strings.Split(os.Getenv(EnvSentinelAddrs), ",") {
-		if a = strings.TrimSpace(a); a != "" {
-			c.SentinelAddrs = append(c.SentinelAddrs, a)
-		}
-	}
-	if v := os.Getenv(EnvRedisDB); v != "" {
-		db, err := strconv.Atoi(v)
-		if err != nil {
-			return c, false, fmt.Errorf("%s: %w", EnvRedisDB, err)
-		}
-		c.DB = db
-	}
-	if c.URL == "" && len(c.SentinelAddrs) == 0 {
+	if c.URL == "" {
 		return c, false, nil
 	}
-	return c, true, c.validate()
-}
-
-func (c *Config) validate() error {
-	if c.URL != "" && len(c.SentinelAddrs) > 0 {
-		return fmt.Errorf("set either %s or %s, not both", EnvRedisURL, EnvSentinelAddrs)
+	if _, _, err := cache.ParseURL(c.URL); err != nil {
+		return c, true, fmt.Errorf("%s: %w", EnvRedisURL, err)
 	}
-	if len(c.SentinelAddrs) > 0 && c.SentinelMaster == "" {
-		return fmt.Errorf("%s needs %s", EnvSentinelAddrs, EnvSentinelMaster)
-	}
-	return nil
+	return c, true, nil
 }
 
 func (c *Config) defaults() {
@@ -123,32 +87,19 @@ func defaultOrigin() string {
 	return host + "-" + hex.EncodeToString(b)
 }
 
-// NewClient builds a go-redis client: a Sentinel failover client when sentinel
-// addresses are set, otherwise a plain client from the URL.
-func NewClient(c Config) (redis.UniversalClient, error) {
-	if err := c.validate(); err != nil {
+// NewClient builds a go-redis client from the URL without connecting: a Sentinel
+// failover client when the URL has master_name, otherwise a plain client. Errors
+// never quote the URL, which can carry passwords.
+func NewClient(rawURL string) (*redis.Client, error) {
+	if rawURL == "" {
+		return nil, errors.New("no Redis URL configured")
+	}
+	opts, failover, err := cache.ParseURL(rawURL)
+	if err != nil {
 		return nil, err
 	}
-	if len(c.SentinelAddrs) > 0 {
-		opts := &redis.FailoverOptions{
-			MasterName:       c.SentinelMaster,
-			SentinelAddrs:    c.SentinelAddrs,
-			SentinelPassword: c.SentinelPassword,
-			Username:         c.Username,
-			Password:         c.Password,
-			DB:               c.DB,
-		}
-		if c.TLS {
-			opts.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-		}
-		return redis.NewFailoverClient(opts), nil
-	}
-	if c.URL == "" {
-		return nil, errors.New("no Redis URL or Sentinel addresses configured")
-	}
-	opts, err := redis.ParseURL(c.URL)
-	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", EnvRedisURL, err)
+	if failover != nil {
+		return redis.NewFailoverClient(failover), nil
 	}
 	return redis.NewClient(opts), nil
 }
@@ -158,25 +109,25 @@ func NewClient(c Config) (redis.UniversalClient, error) {
 // through onSubscribed.
 type Redis struct {
 	cfg     Config
-	client  redis.UniversalClient
+	client  *redis.Client
 	metrics Metrics
 }
 
 // NewRedis connects lazily; nothing is dialled until Publish or Run.
 func NewRedis(cfg Config) (*Redis, error) {
 	cfg.defaults()
-	client, err := NewClient(cfg)
+	client, err := NewClient(cfg.URL)
 	if err != nil {
 		return nil, err
 	}
 	return &Redis{cfg: cfg, client: client}, nil
 }
 
-func (r *Redis) Origin() string                { return r.cfg.Origin }
-func (r *Redis) Metrics() *Metrics             { return &r.metrics }
-func (r *Redis) Close() error                  { return r.client.Close() }
-func (r *Redis) Channel() string               { return r.cfg.Channel }
-func (r *Redis) Client() redis.UniversalClient { return r.client }
+func (r *Redis) Origin() string        { return r.cfg.Origin }
+func (r *Redis) Metrics() *Metrics     { return &r.metrics }
+func (r *Redis) Close() error          { return r.client.Close() }
+func (r *Redis) Channel() string       { return r.cfg.Channel }
+func (r *Redis) Client() *redis.Client { return r.client }
 
 func (r *Redis) Publish(ctx context.Context, e Envelope) error {
 	e.V = Version

@@ -98,7 +98,7 @@ func installController(s *server.BaseServer) error {
 		return err
 	}
 	if !on {
-		log.Infof("ha: %s and %s not set, cross-instance updates are off", bus.EnvRedisURL, bus.EnvSentinelAddrs)
+		log.Infof("ha: %s not set, cross-instance updates are off", bus.EnvRedisURL)
 		return nil
 	}
 	opts, err := controllerOptionsFromEnv()

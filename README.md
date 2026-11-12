@@ -37,16 +37,54 @@ are in [dispatcher/README.md](dispatcher/README.md).
 
 ## Management HA configuration (`ha/`)
 
-With none of these set, `cmd/management` is upstream's server unchanged.
+With `NB_HA_REDIS_URL` unset, `cmd/management` is upstream's server unchanged.
+
+All three Redis variables (`NB_HA_REDIS_URL`, `NB_CACHE_REDIS_ADDRESS`, `NB_SIGNAL_REDIS_URL`) take one URL
+format, parsed by the same code (`ha/cache.ParseURL`, mirrored in `dispatcher/`; a test in `ha/bus` checks
+that all three agree). Write it once and reuse it:
+
+- one server: `redis[s]://[user:password@]host:6379[/db]`
+- Sentinel: `redis[s]://[user:password@]sentinel1:26379[/db]?master_name=mymaster&addr=sentinel2:26379&addr=sentinel3:26379`
+  (go-redis `ParseFailoverURL` format; the user info authenticates to the data nodes, `sentinel_username` and
+  `sentinel_password` to the Sentinels; also `db`, `dial_timeout`, `read_timeout`, `write_timeout`,
+  `pool_size`, `skip_verify` for `rediss`; any other option is an error)
 
 | Variable | Meaning |
 |---|---|
-| `NB_HA_WG_PRIVATE_KEY` / `NB_HA_WG_PRIVATE_KEY_FILE` | The server WireGuard private key shared by every instance (`wg genkey` format). Required when the bus is on. The file wins. |
-| `NB_HA_REDIS_URL` | Bus on a single Redis/Valkey (`redis://` or `rediss://`). |
-| `NB_HA_REDIS_SENTINEL_ADDRS`, `NB_HA_REDIS_SENTINEL_MASTER` | Bus through Sentinel instead (comma-separated `host:port`). Optional: `NB_HA_REDIS_SENTINEL_PASSWORD`, `NB_HA_REDIS_USERNAME`, `NB_HA_REDIS_PASSWORD`, `NB_HA_REDIS_DB`, `NB_HA_REDIS_TLS=true`. |
+| `NB_HA_REDIS_URL` | Turns HA on: the management update bus. Then the store must be PostgreSQL and `NB_CACHE_REDIS_ADDRESS` and the shared key must be set, or the instance refuses to start. |
+| `NB_HA_WG_PRIVATE_KEY` / `NB_HA_WG_PRIVATE_KEY_FILE` | The server WireGuard private key shared by every instance (`wg genkey` format). The file wins. |
+| `NB_HA_INSTANCE_ID` | This instance's name on the bus, in the migration record and the ephemeral registry (default hostname plus a random suffix, new on every start). Set it to a stable unique name. |
 | `NB_HA_BUS_CHANNEL` | Pub/sub channel (default `netbird-ha:mgmt:updates`). |
-| `NB_HA_INSTANCE_ID` | This instance's ID on the bus (default hostname plus a random suffix). |
 | `NB_HA_RESYNC_INTERVAL` | Periodic network-map resync for accounts with local streams (default `10m`, `off` to disable). A resync also runs after every (re)subscription. |
+| `NB_HA_FORCE_MIGRATIONS` | `true` runs upstream's migrations even when another instance already ran them for this release (`ha/store`). |
 
 Metrics: `netbird_ha_bus_*` and `netbird_ha_controller_*` on the management metrics port. Other
 workstreams add their overrides with `ha.Register` from an `init` function in their own file.
+
+## Two-instance deployment: environment
+
+Every management instance gets the same values except `NB_HA_INSTANCE_ID`; likewise every signal instance
+except `NB_SIGNAL_INSTANCE_ID`. With Valkey behind Sentinel (`$REDIS` below; a plain `redis://host:6379`
+works too, but then Redis is a single point of failure):
+
+```sh
+REDIS='redis://:valkeypw@sentinel1:26379?master_name=mymaster&addr=sentinel2:26379&addr=sentinel3:26379&sentinel_password=sentinelpw'
+
+# management (netbird-ha/management image), mgmt-1 and mgmt-2
+NB_HA_INSTANCE_ID=mgmt-1                        # mgmt-2 on the other one
+NB_HA_REDIS_URL=$REDIS                          # update bus
+NB_CACHE_REDIS_ADDRESS=$REDIS                   # sessions, PKCE, one-time tokens, IdP cache
+NB_HA_WG_PRIVATE_KEY_FILE=/run/secrets/mgmt_wg_key   # same key on both
+NB_STORE_ENGINE_POSTGRES_DSN='host=pg1,pg2 port=5432 user=netbird password=... dbname=netbird target_session_attrs=read-write'
+# management.json: "StoreConfig": {"Engine": "postgres"} (or NETBIRD_STORE_ENGINE=postgres),
+#   the same DataStoreEncryptionKey, Relay secret and IdP settings on both instances.
+# Leave NB_STORE_ENGINE_POSTGRES_REPLICA_DSN unset: replica lag serves stale network maps.
+
+# signal (netbird-ha/signal image), signal-1 and signal-2
+NB_SIGNAL_INSTANCE_ID=signal-1                  # signal-2 on the other one
+NB_SIGNAL_REDIS_URL=$REDIS
+```
+
+One URL for all three is fine: the bus uses only pub/sub, and the cache and signal keys have their own
+prefixes. To separate them anyway, add `&db=N` (or put `/N` before the `?`). Optional tuning for signal is in [dispatcher/README.md](dispatcher/README.md). Clients see one
+management URL and one signal URL on the load balancer; list each relay by its own URL with the same secret.
