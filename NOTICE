@@ -1,0 +1,22 @@
+netbird-ha (working name)
+Copyright (C) 2026 the netbird-ha authors
+
+This program is free software: you can redistribute it and/or modify it under the
+terms of the GNU Affero General Public License version 3 (see LICENSE).
+
+It builds on, and links, the following third-party work:
+
+- NetBird (https://github.com/netbirdio/netbird), Copyright (c) 2022 NetBird GmbH &
+  AUTHORS. The management/, signal/, relay/, combined/ and proxy/ directories are
+  licensed under AGPL-3.0; the rest is BSD-3-Clause. This module requires it as a Go
+  dependency (v0.82.1) and edits none of its files. "NetBird" is a trademark of
+  NetBird GmbH; this project is not affiliated with or endorsed by NetBird GmbH.
+
+- signal-dispatcher (https://github.com/netbirdio/signal-dispatcher), BSD-3-Clause,
+  Copyright (c) 2024, netbirdio. Any code reused from it keeps its license and notice
+  in the directory that contains it (dispatcher/).
+
+- openZro (https://github.com/openzro/openzro), BSD-3-Clause. Any file derived from
+  it keeps its license and notice in the directory that contains it.
+
+WireGuard is a registered trademark of Jason A. Donenfeld.

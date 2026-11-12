@@ -20,3 +20,15 @@ keeps its notice in its own directory. Not affiliated with NetBird GmbH; "NetBir
 
 Rules: each workstream works in its own git worktree and branch (`ws-a`, `ws-b`, `ws-c`, `ws-d`) and merges
 into local `main` when its tests pass (rebase first). Nothing is pushed to any remote yet.
+
+## Building
+
+`make build` builds `bin/netbird-mgmt` and `bin/netbird-signal`; `make test`, `make lint`,
+`make check-upstream-callers` (fails when upstream adds a direct `SendUpdate`/`HasChannel`/`CloseChannel`
+caller that the controller wrapper does not see; allowlist in `scripts/upstream-callers.allowlist`) and
+`make upstream-mgmt-test` (upstream's management tests at the pinned version, HA off). Images:
+`cmd/management/Dockerfile` and `cmd/signal/Dockerfile`, built from the repository root.
+
+TODO (A, once workstream C lands `dispatcher/`): add
+`replace github.com/netbirdio/signal-dispatcher/dispatcher => ./dispatcher` to `go.mod`
+(upstream's module path ends in `/dispatcher`).

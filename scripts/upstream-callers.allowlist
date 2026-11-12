@@ -1,0 +1,10 @@
+# file<TAB>call<TAB>count; regenerate with scripts/check-upstream-callers.sh --update after review
+management/internals/controllers/network_map/controller/controller.go	.CloseChannel	1
+management/internals/controllers/network_map/controller/controller.go	.CloseChannels	1
+management/internals/controllers/network_map/controller/controller.go	.CloseSessionChannel	1
+management/internals/controllers/network_map/controller/controller.go	.CreateChannel	1
+management/internals/controllers/network_map/controller/controller.go	.HasChannel	7
+management/internals/controllers/network_map/controller/controller.go	.SendUpdate	9
+management/internals/shared/grpc/peer_update_handler.go	.SendUpdate	2
+management/internals/shared/grpc/server.go	.CloseChannel	1
+management/internals/shared/grpc/token_mgr.go	.SendUpdate	2
