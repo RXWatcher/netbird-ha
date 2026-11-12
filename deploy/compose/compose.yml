@@ -1,0 +1,285 @@
+# netbird-ha test bed. Drive it with deploy/bed.sh (make bed-up / bed-down);
+# bed.sh generates deploy/.env and passes it with --env-file.
+#
+# Profiles: (none) = one management + one signal; "second" adds mgmt-2 and
+# signal-2; "clients" adds the six enrolled client containers.
+name: nbha-bed
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "20m", max-file: "2" }
+
+x-pgaf: &pgaf
+  image: nbha-bed/pgaf:17
+  build: ./pgaf
+  logging: *logging
+  stop_grace_period: 20s
+  # docker-init as PID 1 reaps the helper processes of the entrypoint.
+  init: true
+  # pg_autoctl needs shared memory beyond Docker's 64 MB default for Postgres.
+  shm_size: 128m
+
+x-valkey: &valkey
+  image: ${NBHA_VALKEY_IMAGE:-valkey/valkey:8.1-alpine}
+  logging: *logging
+
+x-sentinel: &sentinel
+  image: ${NBHA_VALKEY_IMAGE:-valkey/valkey:8.1-alpine}
+  logging: *logging
+  entrypoint: ["/bin/sh", "/sentinel.sh"]
+  volumes:
+    - ./valkey/sentinel.sh:/sentinel.sh:ro
+  depends_on: [valkey-1, valkey-2, valkey-3]
+
+x-mgmt: &mgmt
+  image: ${NBHA_MGMT_IMAGE:-netbirdio/management:0.82.1}
+  logging: *logging
+  command:
+    - --port=80
+    - --log-file=console
+    - --log-level=${NBHA_MGMT_LOG_LEVEL:-info}
+    - --config=/etc/netbird/management.json
+    - --datadir=/var/lib/netbird
+    - --disable-anonymous-metrics
+    - --disable-legacy-port
+  volumes:
+    - ./management/management.json:/etc/netbird/management.json:ro
+  # stock.env or ha.env, chosen by deploy/bed.sh (NBHA_IMPL).
+  env_file: ["./${NBHA_IMPL:-stock}.env"]
+  environment: &mgmt-env
+    NB_STORE_ENGINE_POSTGRES_DSN: ${NBHA_PG_DSN}
+    NB_ACTIVITY_EVENT_STORE_ENGINE: postgres
+    NB_ACTIVITY_EVENT_POSTGRES_DSN: ${NBHA_EVENTS_DSN}
+    NB_SETUP_PAT_ENABLED: "true"
+    NB_DISABLE_GEOLOCATION: "true"
+    NBHA_RELAY_SECRET: ${NBHA_RELAY_SECRET}
+    NBHA_ENCRYPTION_KEY: ${NBHA_ENCRYPTION_KEY}
+    NBHA_IDP_COOKIE_KEY: ${NBHA_IDP_COOKIE_KEY}
+    NBHA_DEX_DSN: ${NBHA_DEX_DSN}
+    NB_HA_WG_PRIVATE_KEY: ${NBHA_WG_PRIVATE_KEY}
+  depends_on:
+    pg-init: { condition: service_completed_successfully }
+    lb: { condition: service_started }
+    sentinel-1: { condition: service_started }
+
+x-signal: &signal
+  image: ${NBHA_SIGNAL_IMAGE:-netbirdio/signal:0.82.1}
+  logging: *logging
+  command: ["--port=80", "--log-file=console", "--log-level=${NBHA_SIGNAL_LOG_LEVEL:-info}"]
+  env_file: ["./${NBHA_IMPL:-stock}.env"]
+  depends_on: [lb, sentinel-1]
+
+x-relay: &relay
+  image: ${NBHA_RELAY_IMAGE:-netbirdio/relay:0.82.1}
+  logging: *logging
+
+x-client: &client
+  image: ${NBHA_CLIENT_IMAGE:-netbirdio/netbird:0.82.1}
+  logging: *logging
+  profiles: [clients]
+  cap_add: [NET_ADMIN, SYS_ADMIN, SYS_RESOURCE]
+  devices: ["/dev/net/tun:/dev/net/tun"]
+  labels:
+    nbha.role: client
+  environment: &client-env
+    NB_SETUP_KEY: ${NBHA_SETUP_KEY:-}
+    NB_LOG_LEVEL: ${NBHA_CLIENT_LOG_LEVEL:-debug}
+    NB_DISABLE_AUTO_CONNECT: "false"
+
+services:
+  # ------------------------------------------------------------ PostgreSQL
+  pgaf-monitor:
+    <<: *pgaf
+    hostname: pgaf-monitor
+    command: [monitor]
+    environment: { PGAF_HOSTNAME: pgaf-monitor }
+    volumes: [pgaf-monitor:/var/lib/postgresql/pgaf]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "5432"]
+      interval: 2s
+      retries: 60
+
+  pg-1:
+    <<: *pgaf
+    hostname: pg-1
+    command: [node]
+    environment:
+      PGAF_HOSTNAME: pg-1
+      PGAF_MONITOR: postgres://autoctl_node@pgaf-monitor:5432/pg_auto_failover?sslmode=disable
+    volumes: [pg-1:/var/lib/postgresql/pgaf]
+    depends_on: { pgaf-monitor: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "5432"]
+      interval: 2s
+      retries: 90
+
+  pg-2:
+    <<: *pgaf
+    hostname: pg-2
+    command: [node]
+    environment:
+      PGAF_HOSTNAME: pg-2
+      PGAF_MONITOR: postgres://autoctl_node@pgaf-monitor:5432/pg_auto_failover?sslmode=disable
+    volumes: [pg-2:/var/lib/postgresql/pgaf]
+    # Start after pg-1 is up so pg-1 becomes the first primary.
+    depends_on: { pg-1: { condition: service_healthy } }
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-p", "5432"]
+      interval: 2s
+      retries: 150
+
+  # Creates the extra databases once a writable primary answers.
+  pg-init:
+    <<: *pgaf
+    restart: "no"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        export PGCONNECT_TIMEOUT=3
+        dsn='postgresql://postgres@pg-1:5432,pg-2:5432/netbird?sslmode=disable&target_session_attrs=read-write'
+        for i in $$(seq 1 120); do psql "$$dsn" -tAc 'select 1' >/dev/null 2>&1 && break; sleep 1; done
+        for db in netbird_events dex; do
+          psql "$$dsn" -tAc "select 1 from pg_database where datname='$$db'" | grep -q 1 || psql "$$dsn" -c "create database $$db"
+        done
+        echo databases ready
+    depends_on: { pg-1: { condition: service_healthy } }
+
+  # ---------------------------------------------------------------- Valkey
+  valkey-1:
+    <<: *valkey
+    hostname: valkey-1
+    command: ["valkey-server", "--save", "", "--appendonly", "no", "--replica-announce-ip", "valkey-1"]
+  valkey-2:
+    <<: *valkey
+    hostname: valkey-2
+    command: ["valkey-server", "--save", "", "--appendonly", "no", "--replica-announce-ip", "valkey-2", "--replicaof", "valkey-1", "6379"]
+    depends_on: [valkey-1]
+  valkey-3:
+    <<: *valkey
+    hostname: valkey-3
+    command: ["valkey-server", "--save", "", "--appendonly", "no", "--replica-announce-ip", "valkey-3", "--replicaof", "valkey-1", "6379"]
+    depends_on: [valkey-1]
+  sentinel-1:
+    <<: *sentinel
+    hostname: sentinel-1
+    environment: { SENTINEL_HOSTNAME: sentinel-1 }
+  sentinel-2:
+    <<: *sentinel
+    hostname: sentinel-2
+    environment: { SENTINEL_HOSTNAME: sentinel-2 }
+  sentinel-3:
+    <<: *sentinel
+    hostname: sentinel-3
+    environment: { SENTINEL_HOSTNAME: sentinel-3 }
+
+  # --------------------------------------------------------- load balancer
+  lb:
+    image: ${NBHA_HAPROXY_IMAGE:-haproxy:3.0-alpine}
+    hostname: lb
+    logging: *logging
+    environment:
+      NBHA_LB_MODE: ${NBHA_LB_MODE:-l4}
+      NBHA_MGMT_BALANCE: ${NBHA_MGMT_BALANCE:-roundrobin}
+      NBHA_SIGNAL_BALANCE: ${NBHA_SIGNAL_BALANCE:-first}
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    # Host ports are ephemeral and bound to loopback; bed.sh and e2e look them up.
+    ports:
+      - "127.0.0.1::80"
+      - "127.0.0.1::8081"
+      - "127.0.0.1::8082"
+      - "127.0.0.1::8404"
+      - "127.0.0.1::9999"
+
+  # ------------------------------------------------------ NetBird services
+  mgmt-1:
+    <<: *mgmt
+    hostname: mgmt-1
+    environment:
+      <<: *mgmt-env
+      NBHA_SIGNAL_URI: ${NBHA_SIGNAL_URI_1:-lb:10001}
+      NB_HA_INSTANCE_ID: mgmt-1
+    volumes:
+      - ./management/management.json:/etc/netbird/management.json:ro
+      - mgmt-1:/var/lib/netbird
+  mgmt-2:
+    <<: *mgmt
+    hostname: mgmt-2
+    profiles: [second]
+    environment:
+      <<: *mgmt-env
+      NBHA_SIGNAL_URI: ${NBHA_SIGNAL_URI_2:-lb:10002}
+      NB_HA_INSTANCE_ID: mgmt-2
+    volumes:
+      - ./management/management.json:/etc/netbird/management.json:ro
+      - mgmt-2:/var/lib/netbird
+
+  signal-1:
+    <<: *signal
+    hostname: signal-1
+    environment: { NB_SIGNAL_INSTANCE_ID: signal-1 }
+  signal-2:
+    <<: *signal
+    hostname: signal-2
+    profiles: [second]
+    environment: { NB_SIGNAL_INSTANCE_ID: signal-2 }
+
+  relay-1:
+    <<: *relay
+    hostname: relay-1
+    environment:
+      NB_LISTEN_ADDRESS: ":80"
+      NB_EXPOSED_ADDRESS: rel://relay-1:80
+      NB_AUTH_SECRET: ${NBHA_RELAY_SECRET}
+      NB_ENABLE_STUN: "true"
+      NB_LOG_LEVEL: info
+  relay-2:
+    <<: *relay
+    hostname: relay-2
+    environment:
+      NB_LISTEN_ADDRESS: ":80"
+      NB_EXPOSED_ADDRESS: rel://relay-2:80
+      NB_AUTH_SECRET: ${NBHA_RELAY_SECRET}
+      NB_ENABLE_STUN: "true"
+      NB_LOG_LEVEL: info
+
+  # --------------------------------------------------------------- clients
+  # c1,c2 pinned to mgmt-1 (lb:8081), c3,c4 to mgmt-2 (lb:8082); each fails
+  # over to the other instance. c5 (mgmt-1) and c6 (mgmt-2) force relayed
+  # connections; c5<->c6 are always relayed.
+  c1:
+    <<: *client
+    hostname: c1
+    environment: { <<: *client-env, NB_HOSTNAME: c1, NB_MANAGEMENT_URL: "http://lb:8081" }
+  c2:
+    <<: *client
+    hostname: c2
+    environment: { <<: *client-env, NB_HOSTNAME: c2, NB_MANAGEMENT_URL: "http://lb:8081" }
+  c3:
+    <<: *client
+    hostname: c3
+    environment: { <<: *client-env, NB_HOSTNAME: c3, NB_MANAGEMENT_URL: "http://lb:8082" }
+  c4:
+    <<: *client
+    hostname: c4
+    environment: { <<: *client-env, NB_HOSTNAME: c4, NB_MANAGEMENT_URL: "http://lb:8082" }
+  c5:
+    <<: *client
+    hostname: c5
+    environment: { <<: *client-env, NB_HOSTNAME: c5, NB_MANAGEMENT_URL: "http://lb:8081", NB_FORCE_RELAY: "true" }
+  c6:
+    <<: *client
+    hostname: c6
+    environment: { <<: *client-env, NB_HOSTNAME: c6, NB_MANAGEMENT_URL: "http://lb:8082", NB_FORCE_RELAY: "true" }
+
+networks:
+  default:
+    name: nbha-bed
+
+volumes:
+  pgaf-monitor:
+  pg-1:
+  pg-2:
+  mgmt-1:
+  mgmt-2:

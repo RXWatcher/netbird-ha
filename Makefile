@@ -43,3 +43,5 @@ upstream-mgmt-test:
 images:
 	docker build -f cmd/management/Dockerfile --build-arg VERSION=$(VERSION) -t netbird-ha/management:$(VERSION) .
 	docker build -f cmd/signal/Dockerfile --build-arg VERSION=$(VERSION) -t netbird-ha/signal:$(VERSION) .
+
+include deploy/bed.mk

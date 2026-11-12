@@ -1,0 +1,29 @@
+{
+  "Stuns": [
+    { "Proto": "udp", "URI": "stun:relay-1:3478" },
+    { "Proto": "udp", "URI": "stun:relay-2:3478" }
+  ],
+  "Relay": {
+    "Addresses": ["rel://relay-1:80", "rel://relay-2:80"],
+    "CredentialsTTL": "24h",
+    "Secret": "{{ .NBHA_RELAY_SECRET }}"
+  },
+  "Signal": {
+    "Proto": "http",
+    "URI": "{{ .NBHA_SIGNAL_URI }}"
+  },
+  "Datadir": "/var/lib/netbird",
+  "DataStoreEncryptionKey": "{{ .NBHA_ENCRYPTION_KEY }}",
+  "StoreConfig": { "Engine": "postgres" },
+  "EmbeddedIdP": {
+    "Enabled": true,
+    "Issuer": "http://lb/oauth2",
+    "SessionCookieEncryptionKey": "{{ .NBHA_IDP_COOKIE_KEY }}",
+    "DashboardRedirectURIs": ["http://lb/nb-auth", "http://lb/nb-silent-auth"],
+    "CLIRedirectURIs": ["http://localhost:53000/"],
+    "Storage": {
+      "Type": "postgres",
+      "Config": { "DSN": "{{ .NBHA_DEX_DSN }}" }
+    }
+  }
+}

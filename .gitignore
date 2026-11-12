@@ -1,3 +1,4 @@
 bin/
 *.test
 /deploy/.env
+/deploy/.state/

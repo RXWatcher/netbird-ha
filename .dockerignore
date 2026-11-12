@@ -1,3 +1,5 @@
 bin/
 deploy/.env
 .git
+deploy/
+e2e/
