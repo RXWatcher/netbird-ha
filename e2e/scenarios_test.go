@@ -213,7 +213,7 @@ func TestS2dUserBlock(t *testing.T) {
 		if err != nil {
 			s.Fatalf("blocked user's peer (on mgmt-2) was not disconnected: %v", err)
 		}
-		s.Logf("user block: peer on mgmt-2 disconnected %s after the call (%s total)", took.Round(time.Millisecond), time.Since(t0).Round(time.Millisecond))
+		s.Logf("user block: user's peer (home mgmt-2) disconnected %s after the call (%s total)", took.Round(time.Millisecond), time.Since(t0).Round(time.Millisecond))
 		if took > propagationBudget {
 			s.Errorf("user block took %s", took)
 		}
@@ -239,7 +239,7 @@ func TestS2dUserBlock(t *testing.T) {
 // 3a. kill -9 of an instance during continuous ping: tunnels keep working,
 // clients reconnect in under 30 s, no decrypt errors.
 func TestS3aKillDuringPing(t *testing.T) {
-	run(t, spec{id: "3a", title: "kill -9 mgmt/signal during continuous ping"}, func(s *S) {
+	run(t, spec{id: "3a", title: "kill -9 mgmt/signal during continuous ping", haIfTwo: true}, func(s *S) {
 		for _, victim := range []string{"mgmt-1", "signal-1"} {
 			killDuringPing(s, victim)
 			healthy(s)
@@ -335,7 +335,7 @@ func killDuringPing(s *S, victim string) {
 // 3b. kill -9 of an instance during connection setup: the new connection is
 // established anyway within 30 s.
 func TestS3bKillDuringSetup(t *testing.T) {
-	run(t, spec{id: "3b", title: "kill -9 mgmt/signal during connection setup"}, func(s *S) {
+	run(t, spec{id: "3b", title: "kill -9 mgmt/signal during connection setup", haIfTwo: true}, func(s *S) {
 		ctx := s.Ctx
 		for _, victim := range []string{"signal-1", "mgmt-1"} {
 			ips := peerIPs(s)
@@ -440,7 +440,7 @@ func TestS4SentinelFailoverDuringChurn(t *testing.T) {
 // 5a. pg_auto_failover switchover: instances keep serving through the
 // multi-host DSN with target_session_attrs=read-write, without a restart.
 func TestS5aPGSwitchover(t *testing.T) {
-	run(t, spec{id: "5a", title: "pg_auto_failover switchover, instances recover"}, func(s *S) {
+	run(t, spec{id: "5a", title: "pg_auto_failover switchover, instances recover", haIfTwo: true}, func(s *S) {
 		pgRoleChange(s, func() error {
 			_, err := bed.PGAutoctl(s.Ctx, "perform", "switchover")
 			return err
@@ -450,7 +450,7 @@ func TestS5aPGSwitchover(t *testing.T) {
 
 // 5b. Hard failover: kill -9 of the primary's container.
 func TestS5bPGFailover(t *testing.T) {
-	run(t, spec{id: "5b", title: "pg_auto_failover failover (kill -9 primary)"}, func(s *S) {
+	run(t, spec{id: "5b", title: "pg_auto_failover failover (kill -9 primary)", haIfTwo: true}, func(s *S) {
 		// pg_auto_failover notices the dead primary after its health checks
 		// fail (about 20-30 s) and promotes the secondary.
 		pgRoleChange(s, func() error {
@@ -722,7 +722,7 @@ func TestS7bEphemeralOfKilledInstance(t *testing.T) {
 
 // 8. Rolling upgrade under load: tunnels keep working, clients reconnect, state converges.
 func TestS8RollingUpgrade(t *testing.T) {
-	run(t, spec{id: "8", title: "rolling upgrade under load"}, func(s *S) {
+	run(t, spec{id: "8", title: "rolling upgrade under load", haIfTwo: true}, func(s *S) {
 		ctx := s.Ctx
 		ips := peerIPs(s)
 		pairs := [][2]string{{"c1", "c3"}, {"c2", "c4"}, {"c5", "c6"}}
