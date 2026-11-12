@@ -34,3 +34,19 @@ caller that the controller wrapper does not see; allowlist in `scripts/upstream-
 module: `make test` and `make lint` cover it, and `make test-dispatcher-integration` runs its Valkey and
 Sentinel tests in Docker. Its configuration (`NB_SIGNAL_REDIS_URL` and friends) and delivery guarantees
 are in [dispatcher/README.md](dispatcher/README.md).
+
+## Management HA configuration (`ha/`)
+
+With none of these set, `cmd/management` is upstream's server unchanged.
+
+| Variable | Meaning |
+|---|---|
+| `NB_HA_WG_PRIVATE_KEY` / `NB_HA_WG_PRIVATE_KEY_FILE` | The server WireGuard private key shared by every instance (`wg genkey` format). Required when the bus is on. The file wins. |
+| `NB_HA_REDIS_URL` | Bus on a single Redis/Valkey (`redis://` or `rediss://`). |
+| `NB_HA_REDIS_SENTINEL_ADDRS`, `NB_HA_REDIS_SENTINEL_MASTER` | Bus through Sentinel instead (comma-separated `host:port`). Optional: `NB_HA_REDIS_SENTINEL_PASSWORD`, `NB_HA_REDIS_USERNAME`, `NB_HA_REDIS_PASSWORD`, `NB_HA_REDIS_DB`, `NB_HA_REDIS_TLS=true`. |
+| `NB_HA_BUS_CHANNEL` | Pub/sub channel (default `netbird-ha:mgmt:updates`). |
+| `NB_HA_INSTANCE_ID` | This instance's ID on the bus (default hostname plus a random suffix). |
+| `NB_HA_RESYNC_INTERVAL` | Periodic network-map resync for accounts with local streams (default `10m`, `off` to disable). A resync also runs after every (re)subscription. |
+
+Metrics: `netbird_ha_bus_*` and `netbird_ha_controller_*` on the management metrics port. Other
+workstreams add their overrides with `ha.Register` from an `init` function in their own file.

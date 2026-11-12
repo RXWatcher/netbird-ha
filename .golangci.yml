@@ -21,6 +21,11 @@ linters:
     rules:
       - path: _test\.go
         linters: [gosec, errcheck]
+      - path: _test\.go
+        text: context-as-argument
+      # Interface implementations and wire constants are documented at the type.
+      - linters: [revive]
+        text: "^exported: "
 formatters:
   enable:
     - gofmt
