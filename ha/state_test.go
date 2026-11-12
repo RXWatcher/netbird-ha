@@ -7,6 +7,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/netbirdio/netbird/management/internals/modules/peers"
+	upstreamephemeral "github.com/netbirdio/netbird/management/internals/modules/peers/ephemeral"
+	"github.com/netbirdio/netbird/management/internals/shared/db"
 	nbcache "github.com/netbirdio/netbird/management/server/cache"
 	nbstore "github.com/netbirdio/netbird/management/server/store"
 	"github.com/netbirdio/netbird/management/server/types"
@@ -21,7 +24,7 @@ import (
 func TestStateOffInjectsNothing(t *testing.T) {
 	s := newBase()
 	require.NoError(t, installState(s))
-	for _, key := range []string{"store.Store", "cache.Store", "ephemeral.Manager", "db.Conn"} {
+	for _, key := range []string{key[nbstore.Store](), key[nbcache.Store](), key[upstreamephemeral.Manager](), "*" + key[db.Conn]()} {
 		_, ok := s.GetContainer(key)
 		assert.False(t, ok, key)
 	}
@@ -44,7 +47,7 @@ func TestStateOnInstallsStoreCacheAndEphemeral(t *testing.T) {
 	assert.IsType(t, &ephemeral.Manager{}, s.EphemeralManager())
 
 	// Upstream's ephemeral manager and its dependencies are still lazy.
-	_, built := s.GetContainer("peers.Manager")
+	_, built := s.GetContainer(key[peers.Manager]())
 	assert.False(t, built)
 }
 

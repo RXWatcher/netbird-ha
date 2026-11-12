@@ -19,8 +19,8 @@ import (
 	"github.com/RXWatcher/netbird-ha/ha/store"
 )
 
-// EnvInstanceID names this instance in the migration record and the
-// ephemeral session registry. It must be unique among running instances;
+// EnvInstanceID names this instance in the migration record. It must be
+// unique among running instances;
 // the default (<hostname>-<8 random hex>) differs on every start.
 const EnvInstanceID = "NB_HA_INSTANCE_ID"
 
@@ -58,8 +58,8 @@ func installState(s *server.BaseServer) error {
 		return fmt.Errorf("HA messaging is configured but %s is not set; sessions, PKCE state and one-time tokens must be shared", nbcache.RedisStoreEnvVar)
 	}
 
-	ephemeral.Install(s, locker, instance, ephemeral.Config{})
-	log.Infof("ha: shared state on as %s (advisory locks, shared cache, ephemeral session registry)", instance)
+	ephemeral.Install(s, ephemeral.Config{})
+	log.Infof("ha: shared state on as %s (advisory locks, shared cache, ephemeral reconcile)", instance)
 	return nil
 }
 

@@ -14,6 +14,7 @@ import (
 
 	"github.com/netbirdio/netbird/management/internals/controllers/network_map/controller"
 	"github.com/netbirdio/netbird/management/internals/controllers/network_map/update_channel"
+	peerlivenesscontroller "github.com/netbirdio/netbird/management/internals/controllers/peerliveness/controller"
 	"github.com/netbirdio/netbird/management/internals/modules/peers"
 	ephemeralmanager "github.com/netbirdio/netbird/management/internals/modules/peers/ephemeral/manager"
 	"github.com/netbirdio/netbird/management/internals/server/config"
@@ -136,7 +137,8 @@ func newAccountManager(t *testing.T, st nbstore.Store, singleAccountDomain strin
 	settingsManager.EXPECT().UpdateExtraSettings(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
 
 	permissionsManager := permissions.NewManager(st)
-	peersManager := peers.NewManager(st, permissionsManager)
+	liveness := peerlivenesscontroller.NewController(st)
+	peersManager := peers.NewManager(st, permissionsManager, liveness)
 	cacheStore, err := nbcache.NewStore(ctx, nbcache.DefaultStoreMaxTimeout, 0, 100)
 	require.NoError(t, err)
 
@@ -145,7 +147,7 @@ func newAccountManager(t *testing.T, st nbstore.Store, singleAccountDomain strin
 	nmc := controller.NewController(ctx, st, metrics, updateManager, requestBuffer, nbserver.MockIntegratedValidator{}, settingsManager,
 		"netbird.cloud", ephemeralmanager.NewEphemeralManager(st, peersManager), &config.Config{}, nil)
 	am, err := nbserver.BuildManager(ctx, &config.Config{}, st, nmc, job.NewJobManager(nil, st, peersManager), nil, singleAccountDomain,
-		&activity.InMemoryEventStore{}, nil, false, nbserver.MockIntegratedValidator{}, metrics, settingsManager, permissionsManager, false, cacheStore)
+		&activity.InMemoryEventStore{}, nil, false, nbserver.MockIntegratedValidator{}, metrics, settingsManager, permissionsManager, false, cacheStore, liveness)
 	require.NoError(t, err)
 	return am
 }

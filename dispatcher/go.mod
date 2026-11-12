@@ -1,5 +1,5 @@
 // Drop-in replacement for github.com/netbirdio/signal-dispatcher/dispatcher at
-// v0.0.0-20250805121659-6b4ac470ca45 (the version NetBird v0.82.1 pins). The root
+// v0.0.0-20250805121659-6b4ac470ca45 (the version NetBird v0.82.1 and v0.83.0 pin). The root
 // module swaps it in with:
 //
 //	replace github.com/netbirdio/signal-dispatcher/dispatcher => ./dispatcher
@@ -9,7 +9,7 @@ go 1.26.0
 
 require (
 	github.com/alicebob/miniredis/v2 v2.40.0
-	github.com/netbirdio/netbird v0.82.1
+	github.com/netbirdio/netbird v0.83.0
 	github.com/redis/go-redis/v9 v9.7.3
 	github.com/sirupsen/logrus v1.9.4
 	github.com/stretchr/testify v1.12.1
@@ -38,7 +38,7 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260401024825-9d38bb4040a9 // indirect
 )
 
-// Copied from NetBird v0.82.1 go.mod: a dependency's replace lines do not apply
+// Copied from NetBird v0.83.0 go.mod: a dependency's replace lines do not apply
 // to the module that requires it.
 replace github.com/cloudflare/circl => codeberg.org/cunicu/circl v0.0.0-20230801113412-fec58fc7b5f6
 

@@ -15,6 +15,7 @@ import (
 	"github.com/netbirdio/netbird/management/internals/controllers/network_map"
 	nmapcontroller "github.com/netbirdio/netbird/management/internals/controllers/network_map/controller"
 	"github.com/netbirdio/netbird/management/internals/controllers/network_map/update_channel"
+	peerlivenesscontroller "github.com/netbirdio/netbird/management/internals/controllers/peerliveness/controller"
 	"github.com/netbirdio/netbird/management/internals/modules/peers"
 	ephemeralmanager "github.com/netbirdio/netbird/management/internals/modules/peers/ephemeral/manager"
 	networkmapdb "github.com/netbirdio/netbird/management/internals/network_map_db"
@@ -56,7 +57,7 @@ func newRealInstance(t *testing.T, ctx context.Context, s store.Store, nmdata *n
 	require.NoError(t, err)
 	settingsManager := settings.NewMockManager(gomock.NewController(t))
 	settingsManager.EXPECT().GetExtraSettings(gomock.Any(), gomock.Any()).Return(&types.ExtraSettings{}, nil).AnyTimes()
-	peersManager := peers.NewManager(s, permissions.NewManager(s))
+	peersManager := peers.NewManager(s, permissions.NewManager(s), peerlivenesscontroller.NewController(s))
 	updates := update_channel.NewPeersUpdateManager(metrics)
 	inner := nmapcontroller.NewController(ctx, s, metrics, updates, nbserver.NewAccountRequestBuffer(ctx, s),
 		nbserver.MockIntegratedValidator{}, settingsManager, "netbird.selfhosted",

@@ -188,7 +188,7 @@ type DynClientOptions struct {
 func StartDynClient(ctx context.Context, name string, o DynClientOptions) (*DynClient, error) {
 	image := os.Getenv("NBHA_CLIENT_IMAGE")
 	if image == "" {
-		image = "netbirdio/netbird:0.82.1"
+		image = "netbirdio/netbird:0.83.0"
 	}
 	c := &DynClient{Name: name, Container: Project + "-dyn-" + name}
 	_, _ = Docker(ctx, "rm", "-f", c.Container)

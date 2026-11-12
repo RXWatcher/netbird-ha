@@ -32,7 +32,7 @@ x-sentinel: &sentinel
   depends_on: [valkey-1, valkey-2, valkey-3]
 
 x-mgmt: &mgmt
-  image: ${NBHA_MGMT_IMAGE:-netbirdio/management:0.82.1}
+  image: ${NBHA_MGMT_IMAGE:-netbirdio/management:0.83.0}
   logging: *logging
   command:
     - --port=80
@@ -63,18 +63,18 @@ x-mgmt: &mgmt
     sentinel-1: { condition: service_started }
 
 x-signal: &signal
-  image: ${NBHA_SIGNAL_IMAGE:-netbirdio/signal:0.82.1}
+  image: ${NBHA_SIGNAL_IMAGE:-netbirdio/signal:0.83.0}
   logging: *logging
   command: ["--port=80", "--log-file=console", "--log-level=${NBHA_SIGNAL_LOG_LEVEL:-info}"]
   env_file: ["./${NBHA_IMPL:-stock}.env"]
   depends_on: [lb, sentinel-1]
 
 x-relay: &relay
-  image: ${NBHA_RELAY_IMAGE:-netbirdio/relay:0.82.1}
+  image: ${NBHA_RELAY_IMAGE:-netbirdio/relay:0.83.0}
   logging: *logging
 
 x-client: &client
-  image: ${NBHA_CLIENT_IMAGE:-netbirdio/netbird:0.82.1}
+  image: ${NBHA_CLIENT_IMAGE:-netbirdio/netbird:0.83.0}
   logging: *logging
   profiles: [clients]
   cap_add: [NET_ADMIN, SYS_ADMIN, SYS_RESOURCE]

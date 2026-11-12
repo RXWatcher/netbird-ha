@@ -1,14 +1,19 @@
 package ha
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 
+	"github.com/netbirdio/netbird/management/internals/controllers/network_map"
 	"github.com/netbirdio/netbird/management/internals/server"
 	nbconfig "github.com/netbirdio/netbird/management/internals/server/config"
+	nbgrpc "github.com/netbirdio/netbird/management/internals/shared/grpc"
+	nbstore "github.com/netbirdio/netbird/management/server/store"
+	"github.com/netbirdio/netbird/management/server/telemetry"
 
 	"github.com/RXWatcher/netbird-ha/ha/bus"
 	"github.com/RXWatcher/netbird-ha/ha/controller"
@@ -19,13 +24,31 @@ func newBase() *server.BaseServer {
 	return server.NewServer(&server.Config{NbConfig: &nbconfig.Config{}})
 }
 
+// key is upstream's container key for the named type T: its full package path
+// and name (typeKey in management/internals/server/container.go since v0.83.0).
+func key[T any]() string {
+	t := reflect.TypeFor[T]()
+	return t.PkgPath() + "." + t.Name()
+}
+
+type keyProbe interface{ probe() }
+
+// TestContainerKey keeps key in step with upstream, so that the "not built"
+// checks below cannot pass by looking up a key upstream never uses.
+func TestContainerKey(t *testing.T) {
+	s := newBase()
+	server.Create(s, func() keyProbe { return nil })
+	_, ok := s.GetContainer(key[keyProbe]())
+	assert.True(t, ok, key[keyProbe]())
+}
+
 func TestHAOffInjectsNothing(t *testing.T) {
 	s := newBase()
 	require.NoError(t, installWGKey(s))
 	require.NoError(t, installController(s))
-	_, ok := s.GetContainer("network_map.Controller")
+	_, ok := s.GetContainer(key[network_map.Controller]())
 	assert.False(t, ok)
-	_, ok = s.GetContainer("grpc.SecretsManager")
+	_, ok = s.GetContainer(key[nbgrpc.SecretsManager]())
 	assert.False(t, ok)
 }
 
@@ -39,10 +62,10 @@ func TestHAOnInjectsLazyWrappers(t *testing.T) {
 	require.NoError(t, installWGKey(s))
 	require.NoError(t, installController(s))
 
-	c, ok := s.GetContainer("network_map.Controller")
+	c, ok := s.GetContainer(key[network_map.Controller]())
 	require.True(t, ok)
 	assert.IsType(t, &controller.Controller{}, c)
-	sm, ok := s.GetContainer("grpc.SecretsManager")
+	sm, ok := s.GetContainer(key[nbgrpc.SecretsManager]())
 	require.True(t, ok)
 	got, _ := sm.(*wgkey.SecretsManager).GetWGKey()
 	assert.Equal(t, k, got)
@@ -52,7 +75,7 @@ func TestHAOnInjectsLazyWrappers(t *testing.T) {
 	assert.Same(t, sm, s.SecretsManager())
 
 	// Injecting must not have built any real dependency.
-	for _, key := range []string{"store.Store", "telemetry.AppMetrics", "network_map.PeersUpdateManager"} {
+	for _, key := range []string{key[nbstore.Store](), key[telemetry.AppMetrics](), key[network_map.PeersUpdateManager]()} {
 		_, built := s.GetContainer(key)
 		assert.False(t, built, key)
 	}

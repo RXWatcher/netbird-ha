@@ -633,8 +633,9 @@ func TestS7EphemeralMove(t *testing.T) {
 }
 
 // 7b. An ephemeral peer whose instance dies with it (host loss) is still
-// cleaned up. The dead instance never marks the peer disconnected, so upstream
-// skips it for ever; ha/ephemeral's registry notices the stale session.
+// cleaned up. Upstream (v0.83.0+) reads the peer as disconnected once the dead
+// instance's heartbeat is stale, but only a restart would schedule its
+// deletion; ha/ephemeral's reconcile hands it to upstream's ephemeral manager.
 func TestS7bEphemeralOfKilledInstance(t *testing.T) {
 	run(t, spec{id: "7b", title: "ephemeral peer of a killed instance is cleaned up", haOnly: true, long: true}, func(s *S) {
 		ctx := s.Ctx
@@ -693,9 +694,11 @@ func TestS7bEphemeralOfKilledInstance(t *testing.T) {
 			}
 		}
 		s.Logf("killed mgmt-1 holding %s's stream and removed the client", name)
-		// ha/ephemeral: stale after 3 min (+ up to 1.2 min reconcile), then
-		// upstream's 10 min lifetime with a 1 min cleanup window.
-		wait := envDuration("NBHA_EPHEMERAL_CLEANUP_WAIT", 17*time.Minute)
+		// Upstream: the instance is stale 5 min after its last heartbeat (up to
+		// 1 min before the kill); ha/ephemeral's reconcile (1 min + 20% jitter)
+		// schedules the peer, then upstream's 10 min lifetime and 1 min cleanup
+		// window.
+		wait := envDuration("NBHA_EPHEMERAL_CLEANUP_WAIT", 20*time.Minute)
 		var tDisc time.Duration
 		took, err := bed.Eventually(ctx, wait, 10*time.Second, func() error {
 			api := s.B.API

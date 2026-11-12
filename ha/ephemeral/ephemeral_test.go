@@ -13,6 +13,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/netbirdio/netbird/management/internals/controllers/network_map"
+	peerlivenesscontroller "github.com/netbirdio/netbird/management/internals/controllers/peerliveness/controller"
 	"github.com/netbirdio/netbird/management/internals/modules/peers"
 	upstream "github.com/netbirdio/netbird/management/internals/modules/peers/ephemeral"
 	"github.com/netbirdio/netbird/management/internals/shared/db"
@@ -75,7 +76,7 @@ func newEnv(t *testing.T) *env {
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
 	locker := hastore.NewLocker(pool)
-	st, _, err := hastore.OpenSQLStore(ctx, conn, nil, locker, hastore.MigrationOptions{Version: "v0.82.1"})
+	st, _, err := hastore.OpenSQLStore(ctx, conn, nil, locker, hastore.MigrationOptions{Version: "test"})
 	require.NoError(t, err)
 
 	account := &types.Account{
@@ -91,32 +92,43 @@ func newEnv(t *testing.T) *env {
 
 var ipCounter byte
 
-// addPeer creates an ephemeral peer, connected with session when session > 0.
-func (e *env) addPeer(t *testing.T, id string, session int64) *nbpeer.Peer {
+// instance registers a management instance in upstream's liveness table.
+func (e *env) instance(t *testing.T, id string) {
+	t.Helper()
+	require.NoError(t, e.store.RegisterInstance(context.Background(), id, "host-"+id))
+}
+
+// kill makes the instance look dead: no heartbeat for an hour.
+func (e *env) kill(t *testing.T, id string) {
+	t.Helper()
+	_, err := e.locker.Pool().Exec(context.Background(),
+		`UPDATE management_instances SET last_seen = now() - interval '1 hour' WHERE id = $1`, id)
+	require.NoError(t, err)
+}
+
+// addPeer creates an ephemeral peer. With an instance it is connected there
+// with a new session; without one it has the session-less connection record
+// that a new peer, or the v0.83.0 backfill, starts with.
+func (e *env) addPeer(t *testing.T, id, instance string) *nbpeer.Peer {
 	t.Helper()
 	ipCounter++
 	p := &nbpeer.Peer{
 		ID: id, AccountID: accountID, Key: "key-" + id, Name: id, DNSLabel: id,
 		IP: netip.AddrFrom4([4]byte{100, 64, 0, ipCounter}), Ephemeral: true,
-		Status: &nbpeer.PeerStatus{LastSeen: time.Now()},
+		Status: &nbpeer.PeerStatus{},
 	}
 	require.NoError(t, e.store.AddPeerToAccount(context.Background(), p))
-	if session > 0 {
-		ok, err := e.store.MarkPeerConnectedIfNewerSession(context.Background(), accountID, id, session)
-		require.NoError(t, err)
-		require.True(t, ok)
+	if instance != "" {
+		e.connect(t, id, instance)
 	}
-	got, err := e.store.GetPeerByID(context.Background(), nbstore.LockingStrengthNone, accountID, id)
-	require.NoError(t, err)
-	return got
+	return e.peer(t, id)
 }
 
-// age makes the peer look last seen long ago.
-func (e *env) age(t *testing.T, id string) {
+func (e *env) connect(t *testing.T, id, instance string) {
 	t.Helper()
-	_, err := e.locker.Pool().Exec(context.Background(),
-		`UPDATE peers SET peer_status_last_seen = now() - interval '1 hour' WHERE id = $1`, id)
+	ok, err := e.store.ConnectPeer(context.Background(), accountID, id, instance, time.Now().UnixNano())
 	require.NoError(t, err)
+	require.True(t, ok)
 }
 
 func (e *env) peer(t *testing.T, id string) *nbpeer.Peer {
@@ -126,219 +138,91 @@ func (e *env) peer(t *testing.T, id string) *nbpeer.Peer {
 	return p
 }
 
-func (e *env) manager(t *testing.T, instance string) (*Manager, *fakeInner) {
+func (e *env) manager(t *testing.T) (*Manager, *fakeInner) {
 	t.Helper()
 	inner := &fakeInner{}
-	m := New(func() upstream.Manager { return inner }, func() nbstore.Store { return e.store }, e.locker, instance,
-		Config{HeartbeatInterval: time.Hour, StaleAfter: 2 * time.Second, ReconcileInterval: time.Hour})
-	require.NoError(t, m.Start(context.Background()))
+	m := New(func() upstream.Manager { return inner }, func() nbstore.Store { return e.store }, Config{ReconcileInterval: time.Hour})
 	t.Cleanup(m.Stop)
 	return m, inner
 }
 
-func newSession() int64 { return time.Now().UnixNano() }
-
-func TestReconcileLeavesLiveSessionsAlone(t *testing.T) {
+func TestReconcileLeavesConnectedPeersAlone(t *testing.T) {
 	e := newEnv(t)
-	a, innerA := e.manager(t, "mgmt-a")
-	b, innerB := e.manager(t, "mgmt-b")
-	ctx := context.Background()
+	m, inner := e.manager(t)
+	e.instance(t, "live")
+	e.addPeer(t, "p", "live")
+	require.True(t, e.peer(t, "p").Status.Connected)
 
-	live := e.addPeer(t, "live", newSession())
-	a.OnPeerConnected(ctx, live)
-	assert.Equal(t, []string{"live"}, innerA.connected, "upstream still sees the connect")
-	a.Heartbeat(ctx)
-	e.age(t, "live")
-
-	taken, err := b.Reconcile(ctx)
+	n, err := m.Reconcile(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, 0, taken)
-	assert.True(t, e.peer(t, "live").Status.Connected)
-	assert.Empty(t, innerB.disconnects())
+	assert.Equal(t, 0, n)
+	assert.Empty(t, inner.disconnects())
 }
 
-func TestReconcileTakesOverPeersOfADeadInstance(t *testing.T) {
+func TestReconcileSchedulesPeersOfADeadInstance(t *testing.T) {
 	e := newEnv(t)
-	b, innerB := e.manager(t, "mgmt-b")
-	ctx := context.Background()
+	m, inner := e.manager(t)
+	e.instance(t, "dead")
+	e.instance(t, "live")
+	e.addPeer(t, "orphan", "dead")
+	e.addPeer(t, "kept", "live")
+	// Never held by a v0.83.0+ instance (or held by an older release during
+	// a rolling upgrade): left to upstream's own boot-time load.
+	e.addPeer(t, "sessionless", "")
+	e.kill(t, "dead")
+	require.False(t, e.peer(t, "orphan").Status.Connected, "upstream reads a dead instance's peer as disconnected")
 
-	// "dead" is connected to an instance that was killed: the database says
-	// connected and nobody refreshes its session.
-	dead := e.addPeer(t, "dead", newSession())
-	e.age(t, "dead")
-	// Recently connected peers get a grace period before anyone judges
-	// them, even without a heartbeat yet.
-	e.addPeer(t, "fresh", newSession())
-
-	taken, err := b.Reconcile(ctx)
+	n, err := m.Reconcile(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, 1, taken)
-	assert.False(t, e.peer(t, "dead").Status.Connected)
-	assert.Equal(t, int64(0), e.peer(t, "dead").Status.SessionStartedAt)
-	assert.Equal(t, []string{dead.ID}, innerB.disconnects(), "handed to upstream's manager for deletion")
-	assert.True(t, e.peer(t, "fresh").Status.Connected)
-
-	// Nothing left to take.
-	taken, err = b.Reconcile(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, 0, taken)
+	assert.Equal(t, 1, n)
+	assert.Equal(t, []string{"orphan"}, inner.disconnects(), "handed to upstream's manager for deletion")
 }
 
-func TestReconcileIgnoresSessionsFromBeforeTheRegistry(t *testing.T) {
+func TestReconcileSkipsAPeerThatMoved(t *testing.T) {
 	e := newEnv(t)
-	// A session that started before any HA instance ran: it may belong to
-	// a stock instance, which never heartbeats.
-	e.addPeer(t, "old", time.Now().Add(-time.Hour).UnixNano())
-	e.age(t, "old")
-	b, innerB := e.manager(t, "mgmt-b")
+	m, inner := e.manager(t)
+	e.instance(t, "dead")
+	e.instance(t, "live")
+	e.addPeer(t, "mover", "dead")
+	e.kill(t, "dead")
+	e.connect(t, "mover", "live")
 
-	taken, err := b.Reconcile(context.Background())
+	n, err := m.Reconcile(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, 0, taken)
-	assert.True(t, e.peer(t, "old").Status.Connected)
-	assert.Empty(t, innerB.disconnects())
+	assert.Equal(t, 0, n)
+	assert.Empty(t, inner.disconnects())
 }
 
-func TestConcurrentReconcilesTakeAPeerOnce(t *testing.T) {
+func TestReconcileSchedulesEveryOrphan(t *testing.T) {
 	e := newEnv(t)
-	const instances = 4
-	managers := make([]*Manager, instances)
-	inners := make([]*fakeInner, instances)
-	for i := range instances {
-		managers[i], inners[i] = e.manager(t, fmt.Sprintf("mgmt-%d", i))
-	}
+	m, inner := e.manager(t)
+	e.instance(t, "dead")
 	for i := range 10 {
-		e.addPeer(t, fmt.Sprintf("dead-%d", i), newSession())
-		e.age(t, fmt.Sprintf("dead-%d", i))
+		e.addPeer(t, fmt.Sprintf("orphan-%d", i), "dead")
 	}
+	e.kill(t, "dead")
 
-	var wg sync.WaitGroup
-	for _, m := range managers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			_, err := m.Reconcile(context.Background())
-			assert.NoError(t, err)
-		}()
-	}
-	wg.Wait()
-
-	total := 0
-	seen := map[string]bool{}
-	for _, inner := range inners {
-		for _, id := range inner.disconnects() {
-			assert.False(t, seen[id], "%s scheduled twice", id)
-			seen[id] = true
-			total++
-		}
-	}
-	assert.Equal(t, 10, total)
+	n, err := m.Reconcile(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 10, n)
+	assert.Len(t, inner.disconnects(), 10)
 }
 
-func TestPeerThatReconnectedIsNotTakenOver(t *testing.T) {
-	e := newEnv(t)
-	b, innerB := e.manager(t, "mgmt-b")
-	ctx := context.Background()
-
-	p := e.addPeer(t, "mover", newSession())
-	e.age(t, "mover")
-	stale := p.Status.SessionStartedAt
-	// It reconnects elsewhere between the candidate query and the fenced
-	// write: the stale session no longer matches.
-	ok, err := e.store.MarkPeerConnectedIfNewerSession(ctx, accountID, "mover", newSession())
-	require.NoError(t, err)
-	require.True(t, ok)
-	updated, err := e.store.MarkPeerDisconnectedIfSameSession(ctx, accountID, "mover", stale)
-	require.NoError(t, err)
-	assert.False(t, updated, "upstream's fencing rejects the stale session")
-
-	// The new session is recent, so the reconcile leaves it alone too.
-	taken, err := b.Reconcile(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, 0, taken)
-	assert.True(t, e.peer(t, "mover").Status.Connected)
-	assert.Empty(t, innerB.disconnects())
-}
-
-func TestPartitionedInstanceReclaimsItsPeers(t *testing.T) {
-	e := newEnv(t)
-	a, _ := e.manager(t, "mgmt-a")
-	b, _ := e.manager(t, "mgmt-b")
-	ctx := context.Background()
-
-	p := e.addPeer(t, "kept", newSession())
-	a.OnPeerConnected(ctx, p)
-	a.Heartbeat(ctx)
-
-	// A loses the database for longer than StaleAfter; B takes the peer.
-	_, err := e.locker.Pool().Exec(ctx, `UPDATE `+sessionsTable+` SET heartbeat_at = now() - interval '1 hour'`)
-	require.NoError(t, err)
-	e.age(t, "kept")
-	a.mu.Lock()
-	a.heartbeatFailed = true
-	a.mu.Unlock()
-	taken, err := b.Reconcile(ctx)
-	require.NoError(t, err)
-	require.Equal(t, 1, taken)
-	require.False(t, e.peer(t, "kept").Status.Connected)
-
-	// A's database comes back: its next heartbeat re-marks its live
-	// stream's peer connected with the same session, so upstream's
-	// connected check stops the deletion.
-	a.Heartbeat(ctx)
-	got := e.peer(t, "kept")
-	assert.True(t, got.Status.Connected)
-	assert.Equal(t, p.Status.SessionStartedAt, got.Status.SessionStartedAt)
-	a.mu.Lock()
-	assert.False(t, a.heartbeatFailed)
-	a.mu.Unlock()
-}
-
-func TestDisconnectAndStopRemoveRegistryRows(t *testing.T) {
-	e := newEnv(t)
-	a, innerA := e.manager(t, "mgmt-a")
-	ctx := context.Background()
-	rows := func() int {
-		var n int
-		require.NoError(t, e.locker.Pool().QueryRow(ctx, `SELECT count(*) FROM `+sessionsTable).Scan(&n))
-		return n
-	}
-
-	p1 := e.addPeer(t, "p1", newSession())
-	p2 := e.addPeer(t, "p2", newSession())
-	a.OnPeerConnected(ctx, p1)
-	a.OnPeerConnected(ctx, p2)
-	// A non-ephemeral peer is not tracked.
-	notEphemeral := *p1
-	notEphemeral.ID, notEphemeral.Ephemeral = "static", false
-	a.OnPeerConnected(ctx, &notEphemeral)
-	a.Heartbeat(ctx)
-	assert.Equal(t, 2, rows())
-
-	a.OnPeerDisconnected(ctx, p1)
-	assert.Equal(t, 1, rows())
-	assert.Equal(t, []string{"p1"}, innerA.disconnects())
-
-	a.Stop()
-	assert.Equal(t, 0, rows())
-	assert.Equal(t, 1, innerA.stopped)
-}
-
-func TestLoadInitialPeersStartsRegistryAndDelegates(t *testing.T) {
+func TestLoadInitialPeersDelegatesAndStopStops(t *testing.T) {
 	e := newEnv(t)
 	inner := &fakeInner{}
-	m := New(func() upstream.Manager { return inner }, func() nbstore.Store { return e.store }, e.locker, "mgmt-a", Config{})
+	m := New(func() upstream.Manager { return inner }, func() nbstore.Store { return e.store }, Config{})
 	m.LoadInitialPeers(context.Background())
-	t.Cleanup(m.Stop)
+	m.Stop()
 	assert.Equal(t, 1, inner.loaded)
-	assert.NotZero(t, m.epoch)
+	assert.Equal(t, 1, inner.stopped)
 }
 
 // TestUpstreamDeleteSkipsConnectedPeers pins the upstream behaviour this
 // package builds on: DeletePeers with checkConnected, which upstream's
-// ephemeral manager uses, keeps a peer the database shows connected (for
-// example after it moved to another instance) and deletes one that has been
-// gone for the ephemeral lifetime.
+// ephemeral manager uses, keeps a peer that reads connected (for example
+// after it moved to another instance) and deletes one that has been gone for
+// the ephemeral lifetime.
 func TestUpstreamDeleteSkipsConnectedPeers(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
@@ -346,14 +230,16 @@ func TestUpstreamDeleteSkipsConnectedPeers(t *testing.T) {
 	nmc := network_map.NewMockController(ctrl)
 	nmc.EXPECT().GetDNSDomain(gomock.Any()).Return("netbird.cloud").AnyTimes()
 
-	pm := peers.NewManager(e.store, permissions.NewManager(e.store))
+	pm := peers.NewManager(e.store, permissions.NewManager(e.store), peerlivenesscontroller.NewController(e.store))
 	pm.SetNetworkMapController(nmc)
 	pm.SetAccountManager(&mock_server.MockAccountManager{})
 
-	e.addPeer(t, "moved", newSession())
-	e.age(t, "moved")
-	e.addPeer(t, "gone", 0)
-	_, err := e.locker.Pool().Exec(ctx, `UPDATE peers SET peer_status_last_seen = now() - $1::interval WHERE id = 'gone'`,
+	e.instance(t, "live")
+	e.instance(t, "dead")
+	e.addPeer(t, "moved", "live")
+	e.addPeer(t, "gone", "dead")
+	e.kill(t, "dead")
+	_, err := e.locker.Pool().Exec(ctx, `UPDATE peer_connections SET last_seen = now() - $1::interval WHERE peer_id IN ('moved', 'gone')`,
 		fmt.Sprintf("%d seconds", int(upstream.EphemeralLifeTime.Seconds())+60))
 	require.NoError(t, err)
 
