@@ -146,11 +146,11 @@ build_images() {
 	if [ "$(env_get NBHA_IMPL)" = ha ]; then
 		local v
 		v=$(env_get NBHA_IMAGE_VERSION)
-		log "building management and signal from cmd/ (make images VERSION=$v)"
-		make -s -C "$ROOT" images VERSION="$v" >/dev/null
+		log "building management and signal from cmd/ (make images HA_VERSION=$v)"
+		make -s -C "$ROOT" images HA_VERSION="$v" IMAGE_TAG="$v" >/dev/null
 		if [ -n "$(env_get NBHA_UPGRADE_MGMT_IMAGE)" ]; then
-			log "building the upgrade images (make images VERSION=$v-next)"
-			make -s -C "$ROOT" images VERSION="$v-next" >/dev/null
+			log "building the upgrade images (make images HA_VERSION=$v-next)"
+			make -s -C "$ROOT" images HA_VERSION="$v-next" IMAGE_TAG="$v-next" >/dev/null
 		fi
 	fi
 }

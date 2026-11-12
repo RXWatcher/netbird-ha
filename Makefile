@@ -6,6 +6,8 @@ GOLANGCI_LINT ?= go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v
 UPSTREAM_VERSION := $(shell awk '$$1=="github.com/netbirdio/netbird"{sub(/^v/,"",$$2);print $$2;exit}' go.mod)
 HA_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 VERSION ?= $(UPSTREAM_VERSION)+netbird-ha.$(HA_VERSION)
+# Docker tags cannot contain "+": the image tag uses "-" for the build-metadata separator.
+IMAGE_TAG ?= $(subst +,-,$(VERSION))
 LDFLAGS := -s -w -X github.com/netbirdio/netbird/version.version=$(VERSION)
 UPSTREAM_DIR = $(shell go list -m -f '{{.Dir}}' github.com/netbirdio/netbird)
 
@@ -41,7 +43,7 @@ upstream-mgmt-test:
 	scripts/upstream-mgmt-test.sh $(PKGS)
 
 images:
-	docker build -f cmd/management/Dockerfile --build-arg VERSION=$(VERSION) -t netbird-ha/management:$(VERSION) .
-	docker build -f cmd/signal/Dockerfile --build-arg VERSION=$(VERSION) -t netbird-ha/signal:$(VERSION) .
+	docker build -f cmd/management/Dockerfile --build-arg VERSION=$(VERSION) -t netbird-ha/management:$(IMAGE_TAG) .
+	docker build -f cmd/signal/Dockerfile --build-arg VERSION=$(VERSION) -t netbird-ha/signal:$(IMAGE_TAG) .
 
 include deploy/bed.mk
