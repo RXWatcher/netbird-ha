@@ -1,6 +1,11 @@
 # Commands assume the repository root is the cwd.
 GOLANGCI_LINT ?= go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# The version NetBird sees is the upstream release this build is based on, with our own version as
+# build metadata (ignored in comparisons): the dashboard's "update available" and client checks then
+# compare against upstream releases, not against our pilot tag.
+UPSTREAM_VERSION := $(shell awk '$$1=="github.com/netbirdio/netbird"{sub(/^v/,"",$$2);print $$2;exit}' go.mod)
+HA_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION ?= $(UPSTREAM_VERSION)+netbird-ha.$(HA_VERSION)
 LDFLAGS := -s -w -X github.com/netbirdio/netbird/version.version=$(VERSION)
 UPSTREAM_DIR = $(shell go list -m -f '{{.Dir}}' github.com/netbirdio/netbird)
 
