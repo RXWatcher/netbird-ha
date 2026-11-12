@@ -9,7 +9,7 @@ It builds on, and links, the following third-party work:
 - NetBird (https://github.com/netbirdio/netbird), Copyright (c) 2022 NetBird GmbH &
   AUTHORS. The management/, signal/, relay/, combined/ and proxy/ directories are
   licensed under AGPL-3.0; the rest is BSD-3-Clause. This module requires it as a Go
-  dependency (v0.82.1) and edits none of its files. "NetBird" is a trademark of
+  dependency (v0.83.0) and edits none of its files. "NetBird" is a trademark of
   NetBird GmbH; this project is not affiliated with or endorsed by NetBird GmbH.
 
 - signal-dispatcher (https://github.com/netbirdio/signal-dispatcher), BSD-3-Clause,

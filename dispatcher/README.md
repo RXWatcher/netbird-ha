@@ -1,7 +1,7 @@
 # Signal dispatcher with Redis routing
 
 This module replaces `github.com/netbirdio/signal-dispatcher/dispatcher` at
-`v0.0.0-20250805121659-6b4ac470ca45`, the version NetBird v0.82.1 pins. It keeps the package path
+`v0.0.0-20250805121659-6b4ac470ca45`, the version NetBird v0.82.1 and v0.83.0 pin. It keeps the package path
 and the exported API that `signal/server` uses (`NewDispatcher`, `SendMessage`,
 `ListenForMessages`), so NetBird's signal server builds unchanged. The root `go.mod` swaps it in
 with:

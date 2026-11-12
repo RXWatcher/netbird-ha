@@ -12,9 +12,9 @@ keeps its notice in its own directory. Not affiliated with NetBird GmbH; "NetBir
 
 | Path | What | Workstream |
 |---|---|---|
-| `go.mod`, `cmd/management/`, `cmd/signal/` | module root: requires `github.com/netbirdio/netbird v0.82.1`, copies upstream's `replace` lines, adds the dispatcher `replace` | A (core) |
+| `go.mod`, `cmd/management/`, `cmd/signal/` | module root: requires `github.com/netbirdio/netbird v0.83.0`, copies upstream's `replace` lines, adds the dispatcher `replace` | A (core) |
 | `ha/wgkey/`, `ha/bus/`, `ha/controller/` | shared server WG key, Redis message bus + resync, network-map controller wrapper | A (core) |
-| `ha/store/`, `ha/cache/`, `ha/ephemeral/` | advisory-lock store wrapper (global lock + migrations), Sentinel-aware cache store, ephemeral cross-instance fix | B (state) |
+| `ha/store/`, `ha/cache/`, `ha/ephemeral/` | advisory-lock store wrapper (global lock + migrations), Sentinel-aware cache store, cleanup of ephemeral peers of dead instances | B (state) |
 | `dispatcher/` | own Go module replacing `github.com/netbirdio/signal-dispatcher` (Redis routing) | C (signal) |
 | `deploy/`, `e2e/` | docker compose test bed (pg_auto_failover, Valkey+Sentinel, HAProxy, mgmt x2, signal x2, relay x2, Dex on Postgres, stock clients) and scenario tests | D (test bed) |
 
@@ -53,13 +53,38 @@ that all three agree). Write it once and reuse it:
 |---|---|
 | `NB_HA_REDIS_URL` | Turns HA on: the management update bus. Then the store must be PostgreSQL and `NB_CACHE_REDIS_ADDRESS` and the shared key must be set, or the instance refuses to start. |
 | `NB_HA_WG_PRIVATE_KEY` / `NB_HA_WG_PRIVATE_KEY_FILE` | The server WireGuard private key shared by every instance (`wg genkey` format). The file wins. |
-| `NB_HA_INSTANCE_ID` | This instance's name on the bus, in the migration record and the ephemeral registry (default hostname plus a random suffix, new on every start). Set it to a stable unique name. |
+| `NB_HA_INSTANCE_ID` | This instance's name on the bus and in the migration record (default hostname plus a random suffix, new on every start). Set it to a stable unique name. |
 | `NB_HA_BUS_CHANNEL` | Pub/sub channel (default `netbird-ha:mgmt:updates`). |
 | `NB_HA_RESYNC_INTERVAL` | Periodic network-map resync for accounts with local streams (default `10m`, `off` to disable). A resync also runs after every (re)subscription. |
 | `NB_HA_FORCE_MIGRATIONS` | `true` runs upstream's migrations even when another instance already ran them for this release (`ha/store`). |
 
 Metrics: `netbird_ha_bus_*` and `netbird_ha_controller_*` on the management metrics port. Other
 workstreams add their overrides with `ha.Register` from an `init` function in their own file.
+
+Upstream pieces that are already multi-instance and need nothing from `ha/`:
+
+- Peer liveness (since v0.83.0): every instance registers in `management_instances` and heartbeats each
+  minute; a peer reads as connected only while a fresh instance holds its row in `peer_connections`, and live
+  instances sweep the connections of an instance that stopped heartbeating (5 min). `ha/ephemeral` only adds
+  the scheduling of the dead instance's ephemeral peers for deletion, which upstream does only at boot.
+- The MCP endpoint (`NB_MCP_ENABLED`, off by default) keeps its OAuth grants in Redis at
+  `NB_CACHE_REDIS_ADDRESS`, which upstream parses as a single-server URL. With a Sentinel URL its OAuth
+  broker turns itself off with a warning and MCP clients must use a personal access token.
+
+## Upgrading to a new upstream release
+
+1. Bump `github.com/netbirdio/netbird` in `go.mod` and `dispatcher/go.mod`, copy any changed `replace`
+   lines, and compare upstream's `toolchain` and its `signal-dispatcher` pin with ours.
+2. `go build ./...` and `go vet ./...`: interface changes (network-map controller, secrets manager, store,
+   ephemeral manager, cache store) show up here. A new `network_map.Controller` method must be wrapped in
+   `ha/controller`.
+3. `make check-upstream-callers`; review each new direct stream caller before `--update`.
+4. Read the release notes and the diff of `management/`, `signal/`, `relay/` for new background jobs, update
+   paths, caches and per-process state.
+5. Review the migration diff as `ha/store/doc.go` describes and decide between a rolling upgrade and a
+   window.
+6. `make test`, `make lint`, `make upstream-mgmt-test`, `NBHA_UPGRADE_BUILD=1 make e2e`, and
+   `NBHA_UPGRADE_FROM=<previous tag> E2E_RUN=TestS8 make e2e` for the mixed-version roll.
 
 ## Two-instance deployment: environment
 
@@ -100,10 +125,11 @@ A local Docker Compose bed (project and network `nbha-bed`) with the topology of
 |---|---|
 | `make bed-up` / `make bed-down` / `make bed-status` | start (with `NBHA_IMPL=ha` it runs `make images` first), remove everything, show state |
 | `make e2e` | fresh bed with this repository's images (2 management, 2 signal), every scenario, then `bed-down` |
-| `make e2e-baseline` | the same with stock `netbirdio/*:0.82.1` images (1 instance; `NBHA_INSTANCES=2` for the two-instance stock baseline, where cross-instance scenarios report XFAIL) |
+| `make e2e-baseline` | the same with stock `netbirdio/*:0.83.0` images (1 instance; `NBHA_INSTANCES=2` for the two-instance stock baseline, where cross-instance scenarios report XFAIL) |
 | `make e2e-run` | the scenarios against the bed that is up now |
 
 Useful variables: `E2E_RUN=<regexp>` selects scenarios, `KEEP_BED=1` leaves the bed up, `NBHA_E2E_LONG=1`
 adds the ephemeral and soak scenarios, `NBHA_SOAK=30m` sets the soak length, `NBHA_UPGRADE_BUILD=1` builds
-a second image set for the rolling upgrade, `NBHA_LB_MODE=l7` balances per gRPC stream. The report table
+a second image set for the rolling upgrade, `NBHA_UPGRADE_FROM=<tag>` starts the bed on an earlier release
+and lets the rolling upgrade move it onto this tree (mixed versions), `NBHA_LB_MODE=l7` balances per gRPC stream. The report table
 is printed at the end and written to `deploy/.state/e2e-report.tsv`. `deploy/bed.sh` documents the rest.

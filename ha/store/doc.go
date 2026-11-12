@@ -41,6 +41,18 @@
 //     keep working while the control plane is down; clients reconnect with
 //     backoff.
 //
+//   - State moved to a new place (new tables written instead of old columns
+//     that stay behind, unread): no query fails, so a rolling upgrade works,
+//     but old and new instances each see only their own writes until the
+//     last old instance stops. Finish the roll quickly. Example: v0.83.0
+//     moved peer liveness from the peers.peer_status_* columns to
+//     peer_connections and management_instances, backfilled once with no
+//     session; new instances read the peers of old instances as
+//     disconnected, and each new instance's ephemeral manager loads every
+//     ephemeral peer at boot and deletes the ones still read as
+//     disconnected ten minutes later. Roll every instance within ten
+//     minutes, or check that the account has no ephemeral peers.
+//
 // Never roll back to an older release after a destructive migration: its
 // migrations are recorded as done and it would run on a schema it does not
 // know. Restore the database instead.
