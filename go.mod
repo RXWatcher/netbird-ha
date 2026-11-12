@@ -6,7 +6,11 @@ toolchain go1.26.10
 
 require (
 	github.com/alicebob/miniredis/v2 v2.40.0
+	github.com/eko/gocache/lib/v4 v4.2.0
+	github.com/eko/gocache/store/redis/v4 v4.2.2
+	github.com/jackc/pgx/v5 v5.10.0
 	github.com/netbirdio/netbird v0.82.1
+	github.com/netbirdio/signal-dispatcher/dispatcher v0.0.0-20250805121659-6b4ac470ca45
 	github.com/redis/go-redis/v9 v9.7.3
 	github.com/sirupsen/logrus v1.9.4
 	github.com/stretchr/testify v1.12.1
@@ -68,9 +72,7 @@ require (
 	github.com/docker/go-connections v0.6.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
 	github.com/ebitengine/purego v0.9.1 // indirect
-	github.com/eko/gocache/lib/v4 v4.2.0 // indirect
 	github.com/eko/gocache/store/go_cache/v4 v4.2.2 // indirect
-	github.com/eko/gocache/store/redis/v4 v4.2.2 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.1 // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.8-0.20250403174932-29230038a667 // indirect
@@ -114,7 +116,6 @@ require (
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
-	github.com/jackc/pgx/v5 v5.10.0 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
@@ -147,7 +148,6 @@ require (
 	github.com/netbirdio/dex v0.244.1-0.20261021152327-0319b501f1a6 // indirect
 	github.com/netbirdio/dex/api/v2 v2.0.0-20261021115841-9f3e6d4c2ce3 // indirect
 	github.com/netbirdio/management-integrations/integrations v0.0.0-20261021190039-6c1585eb11de // indirect
-	github.com/netbirdio/signal-dispatcher/dispatcher v0.0.0-20250805121659-6b4ac470ca45 // indirect
 	github.com/oapi-codegen/runtime v1.1.2 // indirect
 	github.com/okta/okta-sdk-golang/v2 v2.18.0 // indirect
 	github.com/openbao/openbao/api/v2 v2.5.1 // indirect
