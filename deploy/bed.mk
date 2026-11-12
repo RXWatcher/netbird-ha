@@ -36,13 +36,13 @@ e2e-run:
 e2e: SHELL := /bin/bash
 e2e:
 	deploy/bed.sh down >/dev/null 2>&1 || true
-	NBHA_IMPL=$${NBHA_IMPL:-ha} deploy/bed.sh up
+	NBHA_IMPL=$${NBHA_IMPL:-ha} deploy/bed.sh up || { [ "$(KEEP_BED)" = 1 ] || deploy/bed.sh down; exit 1; }
 	rc=0; $(MAKE) --no-print-directory e2e-run || rc=$$?; \
 		[ "$(KEEP_BED)" = 1 ] || deploy/bed.sh down; exit $$rc
 
 e2e-baseline: SHELL := /bin/bash
 e2e-baseline:
 	deploy/bed.sh down >/dev/null 2>&1 || true
-	NBHA_IMPL=stock deploy/bed.sh up
+	NBHA_IMPL=stock deploy/bed.sh up || { [ "$(KEEP_BED)" = 1 ] || deploy/bed.sh down; exit 1; }
 	rc=0; $(MAKE) --no-print-directory e2e-run || rc=$$?; \
 		[ "$(KEEP_BED)" = 1 ] || deploy/bed.sh down; exit $$rc

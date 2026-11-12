@@ -251,6 +251,8 @@ cmd_up() {
 	p80=$(lb_port 80)
 	log "waiting for management on 127.0.0.1:$p80"
 	wait_http "http://127.0.0.1:$(lb_port 8081)/api/instance" 180 || { dc logs --tail 50 mgmt-1 >&2; die "management did not come up"; }
+	# Each HAProxy backend health-checks on its own; :80 can lag :8081.
+	wait_http "http://127.0.0.1:$p80/api/instance" 30 || die "management is up but not behind lb:80"
 	if [ "$(env_get NBHA_INSTANCES)" = 2 ]; then
 		# The first instance creates the schemas alone: upstream's activity-event
 		# store migrates outside the advisory lock (ha/store/doc.go).
